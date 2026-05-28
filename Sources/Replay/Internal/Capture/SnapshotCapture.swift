@@ -30,6 +30,15 @@ final class SnapshotCapture {
 
     private let emit: (NativeSnapshotEventData) -> Void
 
+    /// Wired by ``ReplayCore/start`` once config arrives. Nil → snapshot
+    /// ships tree-only (no `root.imageRef`); player falls back to
+    /// wireframe rendering.
+    var assetUploader: AssetUploader?
+
+    /// Reflects `ReplayConfig.captureSnapshotPixels`. False until
+    /// config lands or remote config flips it off.
+    var captureBitmaps: Bool = false
+
     /// Generation counter — incremented on every trigger. Pending
     /// debounced captures bail out if generation has advanced past
     /// their scheduled gen.
@@ -101,17 +110,78 @@ final class SnapshotCapture {
         guard let tree = ViewTreeSerializer.serialize(window) else { return }
 
         let scale = window.screen.scale
-        let payload = NativeSnapshotEventData(
+        let width = Int(window.bounds.width * scale)
+        let height = Int(window.bounds.height * scale)
+
+        // Bitmap capture is synchronous + must be on main thread —
+        // do it BEFORE handing off to the background async so the
+        // captured tree + pixels are from the SAME frame. A fast
+        // scroll between tree-walk and bitmap would otherwise yield
+        // misaligned nodes.
+        let bitmap: UIImage? = captureBitmaps ? BitmapCapture.capture(window) : nil
+
+        lastLock.withLock { _lastSnapshotAt = now }
+
+        // No bitmap (capture disabled or failed) → emit immediately
+        // with tree-only. Player falls back to wireframe rendering.
+        guard let bitmap else {
+            emit(buildPayload(tree: tree, width: width, height: height, scale: scale, trigger: trigger, imageRef: nil))
+            return
+        }
+
+        // Hand off to a background Task for PNG encode + SHA-256 +
+        // upload. The async work doesn't block the UI; the snapshot
+        // event is emitted once the upload's URL comes back (or
+        // immediately with imageRef=nil if the upload failed).
+        let uploader = assetUploader
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            guard let asset = BitmapCapture.encodeAndHash(bitmap) else {
+                self.emit(self.buildPayload(tree: tree, width: width, height: height, scale: scale, trigger: trigger, imageRef: nil))
+                return
+            }
+            let imageRef: String? = await uploader?.uploadOrCached(asset)
+            self.emit(self.buildPayload(tree: tree, width: width, height: height, scale: scale, trigger: trigger, imageRef: imageRef))
+        }
+        #endif
+    }
+
+    /// Stitch the bitmap URL into the root node + assemble the
+    /// event payload. The root's `imageRef` lets the player render
+    /// a pixel-accurate background; nested image nodes (per-leaf
+    /// UIImageView captures) come in a follow-up commit.
+    private func buildPayload(
+        tree: NativeViewNode,
+        width: Int,
+        height: Int,
+        scale: CGFloat,
+        trigger: String,
+        imageRef: String?
+    ) -> NativeSnapshotEventData {
+        let rootWithImage: NativeViewNode = imageRef.map { ref in
+            NativeViewNode(
+                id: tree.id,
+                type: tree.type,
+                className: tree.className,
+                bounds: tree.bounds,
+                text: tree.text,
+                imageRef: ref,
+                backgroundColor: tree.backgroundColor,
+                opacity: tree.opacity,
+                occluded: tree.occluded,
+                ariaLabel: tree.ariaLabel,
+                children: tree.children
+            )
+        } ?? tree
+
+        return NativeSnapshotEventData(
             recorder: "native",
-            width: Int(window.bounds.width * scale),
-            height: Int(window.bounds.height * scale),
+            width: width,
+            height: height,
             pixelRatio: Double(scale),
             trigger: trigger,
-            root: tree
+            root: rootWithImage
         )
-        lastLock.withLock { _lastSnapshotAt = now }
-        emit(payload)
-        #endif
     }
 
     #if canImport(UIKit)

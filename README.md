@@ -17,11 +17,12 @@ Android SDK's incremental rollout:
   hit-test result up to the most-specific meaningful ancestor,
   classifies + extracts value, emits `tap` events
 - ✅ Manual screen tagging (`Replay.tagScreenName`)
-- ✅ Snapshot pipeline (tree-only) — `ViewTreeSerializer` walks the
-  UIView hierarchy and emits `native_snapshot` events. Triggered on
-  500ms idle after every tap + immediate on `tagScreenName`. Player
-  renders a wireframe today; full bitmap follows in the next commit.
-- ⏳ Snapshot pipeline (bitmap) — `UIView.drawHierarchy` + asset upload
+- ✅ Snapshot pipeline (tree + bitmap) — `ViewTreeSerializer` walks
+  the UIView hierarchy and emits `native_snapshot` events on screen
+  change + 500ms after each tap. Full-screen PNG captured via
+  `UIView.drawHierarchy`, SHA-256 hashed, uploaded to
+  `/v1/replay/assets/:hash`, embedded as `root.imageRef`. Player
+  renders pixel-accurate playback.
 - ⏳ Persistent upload queue — background URLSession + on-disk persistence
 - ⏳ Network capture — `URLProtocol` swizzle
 - ⏳ Crash handler — `NSSetUncaughtExceptionHandler` + signal handlers

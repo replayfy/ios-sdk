@@ -73,11 +73,15 @@ final class ReplayCore {
             tracker.attach()
             self.tapTracker = tracker
 
-            // Snapshot pipeline. Tree-only in this commit; bitmap
-            // capture + asset upload land in the follow-up.
+            // Snapshot pipeline. Bitmap capture + asset upload are
+            // wired now that we have an apiKey / apiHost. captureBitmaps
+            // defaults to config.captureSnapshotPixels (true unless
+            // disabled by customer or future remote config).
             let snapshot = SnapshotCapture { [weak self] snap in
                 self?.emitSnapshot(snap)
             }
+            snapshot.assetUploader = AssetUploader(config: config)
+            snapshot.captureBitmaps = config.captureSnapshotPixels
             self.snapshotCapture = snapshot
 
             // Periodic flush. Cancelled on stop(). Runs detached so
