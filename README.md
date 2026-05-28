@@ -51,7 +51,14 @@ Android SDK's incremental rollout:
   SDK uses — backend's existing classifier handles them. Deferred:
   `tap_response_ms`, `first_network_ttfb_ms`, `battery_drain_pct_per_min`,
   `time_to_first_meaningful_render_ms` (need other hooks first).
-- ⏳ SwiftUI view modifiers (`.replayOcclude()` / `.replayTagScreenName()`)
+- ✅ SwiftUI view modifiers (separate `ReplaySwiftUI` SPM target) —
+  `.replayOcclude(blockGestures:)` overlays a transparent
+  PrivacyMarker UIView and registers it via `Replay.addPrivacyView`;
+  the SDK's PrivacyRegistry bounds-intersection check picks up
+  SwiftUI content rendered at the same screen rect.
+  `.replayTagScreenName("Login")` fires `Replay.tagScreenName` on
+  first `.onAppear` — fixes the auto-tag gap for SwiftUI-first apps
+  where every screen lives under one root UIViewController.
 
 Each ⏳ corresponds to a follow-up commit; see the design docs in
 the `replay-web-sdk` repo (`mobile-vitals-matrix.md`,

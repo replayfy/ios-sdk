@@ -66,7 +66,10 @@ enum ViewTreeSerializer {
         // PrivacyRegistry, blank all human-readable content. We
         // still ship bounds + type + children so the player can
         // render the silhouette + privacy overlay correctly.
-        let occluded = PrivacyRegistry.shared.isSensitive(view)
+        // Combined check — same rationale as TapTracker. UIKit
+        // marker → ancestor walk hit. SwiftUI marker → bounds-
+        // intersection with the marker's screen frame.
+        let occluded = PrivacyRegistry.shared.isSensitiveCombined(view)
 
         // Text content reuses the tap tracker's extractor so a tap on
         // a node and the node's snapshot entry carry the exact same

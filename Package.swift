@@ -19,6 +19,14 @@ let package = Package(
             name: "Replay",
             targets: ["Replay"]
         ),
+        // Optional SwiftUI integration — gives customers
+        // `.replayOcclude()` and `.replayTagScreenName(_:)` view
+        // modifiers. Customers building UIKit-only apps don't need
+        // to import this; it adds nothing at runtime when unused.
+        .library(
+            name: "ReplaySwiftUI",
+            targets: ["ReplaySwiftUI"]
+        ),
     ],
     dependencies: [
         // No external runtime dependencies. URLSession + Foundation
@@ -31,6 +39,15 @@ let package = Package(
             name: "Replay",
             dependencies: [],
             path: "Sources/Replay"
+        ),
+        .target(
+            // SwiftUI integration. Depends on the core Replay target
+            // so the modifiers can call into PrivacyRegistry +
+            // Replay.tagScreenName directly. Single-file target —
+            // ~80% View modifiers + ~20% UIViewRepresentable plumbing.
+            name: "ReplaySwiftUI",
+            dependencies: ["Replay"],
+            path: "Sources/ReplaySwiftUI"
         ),
         // XCTest target deferred until Xcode is installed — the
         // CLT-only Swift toolchain doesn't ship XCTest, so

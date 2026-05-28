@@ -129,7 +129,11 @@ final class TapTracker: NSObject {
         // happened in this region* — never WHICH button or WHAT
         // text. The dashboard renders these as a generic
         // "sensitive tap" marker.
-        let isSensitive = PrivacyRegistry.shared.isSensitive(target)
+        // Combined check — ancestor walk catches UIKit case
+        // (marker is a direct UIView ancestor); bounds intersection
+        // catches the SwiftUI case (marker is a sibling under a
+        // hosting view, not in the ancestor chain).
+        let isSensitive = PrivacyRegistry.shared.isSensitiveCombined(target)
         let uiClass = isSensitive
             ? ""
             : (NSStringFromClass(Swift.type(of: target))

@@ -64,6 +64,40 @@ final class PrivacyRegistry {
         }
     }
 
+    /**
+     * Whether [view]'s screen-relative frame overlaps any registered
+     * privacy marker. Used for SwiftUI integration where the marker
+     * UIView (placed via `.background(UIViewRepresentable…)` or
+     * `.overlay(…)`) is a sibling of the SwiftUI content's hosting
+     * view rather than an ancestor — so ``isSensitive(_:)``'s
+     * superview walk wouldn't catch it.
+     *
+     * Falls back to false when the view has no window (off-screen,
+     * not yet laid out, etc.).
+     */
+    func isSensitiveByBounds(_ view: UIView) -> Bool {
+        guard let window = view.window else { return false }
+        let viewFrame = view.convert(view.bounds, to: window)
+        return lock.withLock {
+            for marker in table.allObjects {
+                guard !marker.isHidden && marker.alpha > 0.01 else { continue }
+                guard marker.window === window else { continue }
+                let markerFrame = marker.convert(marker.bounds, to: window)
+                if markerFrame.intersects(viewFrame) { return true }
+            }
+            return false
+        }
+    }
+
+    /// Combined check — ancestor walk first (cheaper, catches the
+    /// UIKit case where the customer marks a UIView directly), then
+    /// bounds intersection (catches the SwiftUI case where the
+    /// marker sits as a sibling under a hosting view).
+    func isSensitiveCombined(_ view: UIView) -> Bool {
+        if isSensitive(view) { return true }
+        return isSensitiveByBounds(view)
+    }
+
     /// Enumerate currently-tracked views inside `root` (typically
     /// the snapshot's primary window). Used by ``BitmapCapture`` to
     /// know where to paint the overlay. Skips views whose bounds
