@@ -93,7 +93,14 @@ final class ReplayCore {
                 self?.emitSnapshot(snap)
             }
             snapshot.assetUploader = AssetUploader(config: config)
+            snapshot.thumbnailUploader = ThumbnailUploader(config: config)
             snapshot.captureBitmaps = config.captureSnapshotPixels
+            // Provide current sessionId at snapshot time — ensures
+            // the thumbnail upload targets the live session even
+            // after background→foreground rotations.
+            snapshot.sessionIdProvider = { [weak self] in
+                self?.queue.sync { self?.runtime?.sessionId }
+            }
             self.snapshotCapture = snapshot
 
             // Periodic flush. Cancelled on stop(). Runs detached so
@@ -252,6 +259,10 @@ final class ReplayCore {
             deviceContext: DeviceContext.build()
         )
         runtime = rt
+        // Reset the once-per-session thumbnail flag so the new
+        // session's first snapshot fires a fresh upload (not
+        // de-duped by the previous session's hash).
+        snapshotCapture?.thumbnailUploader?.reset()
         // Emit session_start with the synthesized URL — the
         // tagScreenName engine (follow-up commit) will overwrite
         // the trailing segment when the customer or auto-tagger
