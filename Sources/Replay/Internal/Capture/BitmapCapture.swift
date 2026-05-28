@@ -47,6 +47,11 @@ enum BitmapCapture {
         format.opaque = view.isOpaque
         let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
 
+        // Collect privacy-view bounds BEFORE entering the renderer
+        // block — keeps the block focused on draw operations. The
+        // registry call walks the weak table once.
+        let privacyRects = PrivacyRegistry.shared.sensitiveBounds(within: view)
+
         return renderer.image { ctx in
             if scale != 1 {
                 ctx.cgContext.scaleBy(x: scale, y: scale)
@@ -55,6 +60,44 @@ enum BitmapCapture {
             // Setting it to true triggers a layout + render pass on
             // every call which causes frame drops on the UI.
             view.drawHierarchy(in: bounds, afterScreenUpdates: false)
+
+            // Paint a noise-pattern overlay over each privacy view's
+            // bounds. Drawn AFTER drawHierarchy so it sits on top of
+            // the captured pixels, AND only present in the saved
+            // bitmap — never visible on the user's screen.
+            if !privacyRects.isEmpty {
+                paintPrivacyOverlay(rects: privacyRects, in: ctx.cgContext)
+            }
+        }
+    }
+
+    /// Diagonal-stripe pattern over privacy regions. Cheaper than a
+    /// real noise pattern (no per-pixel cost) and visually obvious
+    /// in playback — viewers immediately recognise the "this region
+    /// was hidden" signal.
+    private static func paintPrivacyOverlay(rects: [CGRect], in ctx: CGContext) {
+        for rect in rects {
+            // Solid dark base so any pixel that leaked through
+            // drawHierarchy is overwritten.
+            ctx.setFillColor(UIColor(white: 0.15, alpha: 1.0).cgColor)
+            ctx.fill(rect)
+
+            // Diagonal stripes at 45° spaced 8pt apart. Clip to the
+            // rect so strokes don't bleed.
+            ctx.saveGState()
+            ctx.clip(to: rect)
+            ctx.setStrokeColor(UIColor(white: 0.35, alpha: 1.0).cgColor)
+            ctx.setLineWidth(2)
+            let spacing: CGFloat = 8
+            let diag = rect.width + rect.height
+            var x = rect.minX - rect.height
+            while x < rect.minX + diag {
+                ctx.move(to: CGPoint(x: x, y: rect.minY))
+                ctx.addLine(to: CGPoint(x: x + rect.height, y: rect.maxY))
+                ctx.strokePath()
+                x += spacing
+            }
+            ctx.restoreGState()
         }
     }
 

@@ -62,10 +62,19 @@ enum ViewTreeSerializer {
 
         let type = WidgetClassifier.classify(view)
 
+        // Privacy check: if THIS view or any ancestor is in the
+        // PrivacyRegistry, blank all human-readable content. We
+        // still ship bounds + type + children so the player can
+        // render the silhouette + privacy overlay correctly.
+        let occluded = PrivacyRegistry.shared.isSensitive(view)
+
         // Text content reuses the tap tracker's extractor so a tap on
         // a node and the node's snapshot entry carry the exact same
         // uiValue. Field placeholders extracted, contents never.
+        // Occluded views ship without text — player paints a noise
+        // pattern over them.
         let text: String? = {
+            if occluded { return nil }
             if type == .text || type == .button || type == .field {
                 let v = ValueExtractor.extract(view, type: type)
                 return v.isEmpty ? nil : v
@@ -77,6 +86,7 @@ enum ViewTreeSerializer {
         let opacity: Double? = view.alpha < 1.0 ? Double(view.alpha) : nil
 
         let ariaLabel: String? = {
+            if occluded { return nil }
             guard let label = view.accessibilityLabel, !label.isEmpty else { return nil }
             // Don't double-ship: if accessibilityLabel == text, the
             // dashboard already has it.
@@ -110,7 +120,11 @@ enum ViewTreeSerializer {
             imageRef: nil, // populated in the bitmap-capture follow-up
             backgroundColor: bgColor,
             opacity: opacity,
-            occluded: nil, // wired when occlusion lands
+            // Ship `true` only when this view is itself sensitive
+            // (the dashboard inherits occluded down the subtree
+            // automatically via a parent's `occluded:true` mark).
+            // Omitted when false to save bytes.
+            occluded: occluded ? true : nil,
             ariaLabel: ariaLabel,
             children: children
         )

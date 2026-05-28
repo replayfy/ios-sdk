@@ -96,14 +96,22 @@ public enum Replay {
 
     #if canImport(UIKit)
     /// Mark a view as privacy-sensitive — its contents won't appear
-    /// in playback, taps on it are blanked.
+    /// in playback, taps on it are blanked, and the view tree
+    /// snapshot reports it as `occluded`.
+    ///
+    /// Marks propagate down the view hierarchy: marking a
+    /// `UIStackView` automatically protects every subview without
+    /// per-leaf calls. Removing the mark from a parent (via
+    /// ``removePrivacyView(_:)``) restores subview visibility
+    /// unless they were independently marked.
     public static func addPrivacyView(_ view: UIView) {
-        ReplayCore.shared.stub("addPrivacyView(\(type(of: view)))")
+        PrivacyRegistry.shared.add(view)
     }
 
-    /// Remove a previously-added privacy mark.
+    /// Remove a previously-added privacy mark. Safe to call even
+    /// for views that were never marked.
     public static func removePrivacyView(_ view: UIView) {
-        ReplayCore.shared.stub("removePrivacyView(\(type(of: view)))")
+        PrivacyRegistry.shared.remove(view)
     }
     #endif
 

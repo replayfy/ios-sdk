@@ -123,10 +123,21 @@ final class TapTracker: NSObject {
         let type = WidgetClassifier.classify(target)
         if type == .unknown { return }
 
-        let uiClass = NSStringFromClass(Swift.type(of: target))
-            .components(separatedBy: ".").last ?? "View"
-        let uiValue = ValueExtractor.extract(target, type: type)
-        let uiId = UiIdHasher.uiId(route: currentRoute, uiClass: uiClass, uiValue: uiValue)
+        // Privacy check — if the tapped view (or any ancestor) is
+        // marked sensitive, we blank out uiClass / uiValue / uiId
+        // so the wire event carries only the fact that *a tap
+        // happened in this region* — never WHICH button or WHAT
+        // text. The dashboard renders these as a generic
+        // "sensitive tap" marker.
+        let isSensitive = PrivacyRegistry.shared.isSensitive(target)
+        let uiClass = isSensitive
+            ? ""
+            : (NSStringFromClass(Swift.type(of: target))
+                .components(separatedBy: ".").last ?? "View")
+        let uiValue = isSensitive ? "" : ValueExtractor.extract(target, type: type)
+        let uiId = isSensitive
+            ? "\(currentRoute):sensitive"
+            : UiIdHasher.uiId(route: currentRoute, uiClass: uiClass, uiValue: uiValue)
 
         // Convert points → device pixels for parity with Android
         // (which ships pixel bounds). Scale factor differs per device.
@@ -150,10 +161,10 @@ final class TapTracker: NSObject {
             point: point,
             route: currentRoute,
             uiClass: uiClass,
-            uiType: type.rawValue,
+            uiType: isSensitive ? "unknown" : type.rawValue,
             uiValue: uiValue,
             uiId: uiId,
-            isSensitive: false, // wired when occlusion lands
+            isSensitive: isSensitive,
         )
         emit(tap)
     }
