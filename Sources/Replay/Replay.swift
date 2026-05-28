@@ -89,9 +89,9 @@ public enum Replay {
     // MARK: - Stubs (engine in follow-up commits)
 
     /// Tag the current screen with a name. Manual override for the
-    /// auto-tagger (which uses `UIViewController` class names).
+    /// auto-tagger (which uses `UIViewController` class names by default).
     public static func tagScreenName(_ name: String) {
-        ReplayCore.shared.stub("tagScreenName(\(name))")
+        ReplayCore.shared.setRoute(name)
     }
 
     #if canImport(UIKit)

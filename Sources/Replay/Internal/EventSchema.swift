@@ -119,6 +119,34 @@ struct IngestRequest: Encodable {
     let fingerprint: String?
 }
 
+/// Bounds in screen-relative points (will be converted to pixels
+/// for the wire format to match Android's `TapBounds`).
+struct TapBounds: Encodable {
+    let x: Int
+    let y: Int
+    let w: Int
+    let h: Int
+}
+
+/// Tap coordinates in screen-relative pixels.
+struct TapPoint: Encodable {
+    let x: Int
+    let y: Int
+}
+
+/// One captured tap. Wire-compatible with the Android SDK's
+/// `TapEventData` so the dashboard renders both identically.
+struct TapEventData: Encodable {
+    let bounds: TapBounds
+    let point: TapPoint
+    let route: String
+    let uiClass: String
+    let uiType: String
+    let uiValue: String
+    let uiId: String
+    let isSensitive: Bool
+}
+
 // MARK: - Type-erased Encodable
 
 /// Type-erased Encodable wrapper. Lets us put heterogeneous values

@@ -34,6 +34,7 @@ final class ReplayCore {
     private var sender: BatchSender?
     private var lifecycle: LifecycleObserver?
     private var flushTask: Task<Void, Never>?
+    private var tapTracker: TapTracker?
 
     /// Mirrors the Android SDK's `init` — sets up sender, lifecycle
     /// observer, periodic flush, fires session_start.
@@ -61,6 +62,15 @@ final class ReplayCore {
             )
             self.lifecycle = observer
             observer.attach()
+
+            // Tap tracker — injects a UIGestureRecognizer on every
+            // window. Captures across modals/alerts/popovers without
+            // interfering with the host app's own gestures.
+            let tracker = TapTracker { [weak self] tap in
+                self?.emitTap(tap)
+            }
+            tracker.attach()
+            self.tapTracker = tracker
 
             // Periodic flush. Cancelled on stop(). Runs detached so
             // it doesn't pin a Task tree to the caller.
@@ -167,6 +177,23 @@ final class ReplayCore {
 
     func stub(_ call: String) {
         ReplayLog.verbose("stub: \(call) (engine not yet wired)")
+    }
+
+    // MARK: - Tap relay
+
+    private func emitTap(_ tap: TapEventData) {
+        queue.sync {
+            guard let rt = runtime else { return }
+            pushLocked(rt: rt, type: "tap", data: tap)
+        }
+    }
+
+    /// Wired by `Replay.tagScreenName`. Updates the tracker's route
+    /// so subsequent taps carry the new screen name in uiId.
+    func setRoute(_ route: String) {
+        queue.sync {
+            tapTracker?.currentRoute = route
+        }
     }
 
     // MARK: - Locked helpers (call from `queue.sync` only)
