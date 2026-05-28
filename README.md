@@ -28,7 +28,14 @@ Android SDK's incremental rollout:
   via the lifecycle observer. Capped at 500 queued files / ~25 MB.
   iOS has no WorkManager equivalent so v1 is foreground-only;
   BGTaskScheduler integration is a follow-up.
-- ⏳ Network capture — `URLProtocol` swizzle
+- ✅ Network capture — `URLProtocol` subclass auto-installed on
+  `URLSession.shared` + deprecated NSURLConnection traffic. Captures
+  method, URL, status, timing; headers + bodies behind
+  `captureHeaders` / `maxBodyBytes` config flags. Tag-recursion
+  guard prevents the forwarded request from infinitely re-entering
+  the interceptor. Off by default — set `ReplayConfig(captureNetwork:
+  true)` to enable. Limitation: customer URLSessions with custom
+  `protocolClasses` bypass us without an explicit install.
 - ✅ Crash handler — `NSSetUncaughtExceptionHandler` catches Obj-C
   exceptions; `sigaction` handlers catch SIGSEGV/SIGABRT/SIGBUS/
   SIGFPE/SIGILL/SIGTRAP. Signal handler writes a tiny ASCII record

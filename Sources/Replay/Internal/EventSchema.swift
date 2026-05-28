@@ -200,6 +200,26 @@ struct NativeSnapshotEventData: Encodable {
     let root: NativeViewNode
 }
 
+/// Network request captured by the URLProtocol subclass. Shape
+/// matches the web SDK's NetworkEventData so the dashboard's
+/// Network panel renders without forking per-platform.
+struct NetworkEventData: Encodable {
+    let requestId: String
+    let transport: String // "urlsession"
+    let method: String
+    let url: String
+    let statusCode: Int?
+    let startedAt: Int64
+    let endedAt: Int64?
+    let durationMs: Int64?
+    let ok: Bool?
+    let requestHeaders: [String: String]?
+    let responseHeaders: [String: String]?
+    let requestBody: String?
+    let responseBody: String?
+    let error: String?
+}
+
 /// Crash event — emitted on next launch after a previous-process
 /// crash. Ships as the standard `error` event type so the backend's
 /// existing `errorCount` counter increments correctly; the `kind`

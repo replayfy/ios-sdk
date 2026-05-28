@@ -130,6 +130,24 @@ final class ReplayCore {
                 self.crashHandler = crash
             }
 
+            // Network capture via URLProtocol — auto-installs on
+            // URLSession.shared + deprecated NSURLConnection. Off
+            // by default (PII risk); flip ReplayConfig(captureNetwork:
+            // true) to enable. Customer URLSession configs with
+            // custom protocolClasses bypass us; documented limitation.
+            if config.captureNetwork {
+                URLSessionCapture.emit = { [weak self] event in
+                    self?.emitNetwork(event)
+                }
+                URLSessionCapture.captureHeaders = config.captureHeaders
+                URLSessionCapture.maxBodyBytes = config.maxBodyBytes
+                // Redact patterns: ReplayConfig currently doesn't
+                // expose a list (web SDK has redactUrls; iOS will
+                // add an equivalent in a follow-up). Empty for now.
+                URLSessionCapture.redactPatterns = []
+                URLSessionCapture.install()
+            }
+
             // Periodic flush. Cancelled on stop(). Runs detached so
             // it doesn't pin a Task tree to the caller.
             let interval = config.flushInterval
@@ -244,6 +262,12 @@ final class ReplayCore {
         // next start() call.
         perfMetrics?.stop()
         perfMetrics = nil
+        // Network capture cleanup — clear the emit closure so any
+        // in-flight requests' completion handlers don't push events
+        // into the stopped runtime. Unregister the protocol too;
+        // re-registration is cheap if start() is called again.
+        URLSessionCapture.emit = nil
+        URLSessionCapture.uninstall()
     }
 
     var isRecording: Bool {
@@ -284,6 +308,13 @@ final class ReplayCore {
         queue.sync {
             guard let rt = runtime else { return }
             pushLocked(rt: rt, type: "error", data: data)
+        }
+    }
+
+    private func emitNetwork(_ event: NetworkEventData) {
+        queue.sync {
+            guard let rt = runtime else { return }
+            pushLocked(rt: rt, type: "network", data: event)
         }
     }
 
