@@ -13,8 +13,15 @@ Android SDK's incremental rollout:
 - ✅ UIApplication notification observer (fore/background session boundaries)
 - ✅ SessionRuntime with serial-queue thread safety
 - ✅ Device context (model identifier, viewport, locale, timezone)
-- ⏳ Tap tracker — `UIGestureRecognizer` injected on key window
-- ⏳ Snapshot pipeline — `UIView.drawHierarchy` + asset upload
+- ✅ Tap tracker — `UIGestureRecognizer` injected per window, walks
+  hit-test result up to the most-specific meaningful ancestor,
+  classifies + extracts value, emits `tap` events
+- ✅ Manual screen tagging (`Replay.tagScreenName`)
+- ✅ Snapshot pipeline (tree-only) — `ViewTreeSerializer` walks the
+  UIView hierarchy and emits `native_snapshot` events. Triggered on
+  500ms idle after every tap + immediate on `tagScreenName`. Player
+  renders a wireframe today; full bitmap follows in the next commit.
+- ⏳ Snapshot pipeline (bitmap) — `UIView.drawHierarchy` + asset upload
 - ⏳ Persistent upload queue — background URLSession + on-disk persistence
 - ⏳ Network capture — `URLProtocol` swizzle
 - ⏳ Crash handler — `NSSetUncaughtExceptionHandler` + signal handlers

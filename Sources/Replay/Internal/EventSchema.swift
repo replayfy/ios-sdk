@@ -147,6 +147,59 @@ struct TapEventData: Encodable {
     let isSensitive: Bool
 }
 
+/// Bounds for a tree node. Same shape as TapBounds — kept separate
+/// for semantic clarity. Always in DEVICE PIXELS for cross-platform
+/// parity (multiplied by UIScreen.scale at capture time).
+struct NativeNodeBounds: Encodable {
+    let x: Int
+    let y: Int
+    let w: Int
+    let h: Int
+}
+
+/// One node in a captured view tree. Mirrors the Android SDK's
+/// `NativeViewNode` + the spec in
+/// `replay-web-sdk/docs/native-snapshot-format.md`. Optional fields
+/// are omitted from the wire JSON via Encodable's nil-skip default
+/// behaviour (set via JSONEncoder.outputFormatting in BatchSender).
+struct NativeViewNode: Encodable {
+    /// Sibling-index path id ("0/2/0/1"). Player resolves taps to
+    /// nodes by walking this path.
+    let id: String
+    /// Wire-format type string from WidgetClassifier.UiType.rawValue.
+    let type: String
+    /// Native class simple name (UIButton, UILabel, ...). Player
+    /// ignores; debugging only.
+    let className: String?
+    let bounds: NativeNodeBounds
+    let text: String?
+    /// Content-addressed asset hash. Null today — wired in the
+    /// bitmap-capture follow-up commit.
+    let imageRef: String?
+    /// RGBA hex if solid color, e.g. "#ff336699".
+    let backgroundColor: String?
+    /// 0..1 alpha. Omitted when 1.0.
+    let opacity: Double?
+    /// True if this node or any ancestor is marked occluded.
+    let occluded: Bool?
+    /// UIView.accessibilityLabel — used by the dashboard for
+    /// tooltips + screen-reader playback.
+    let ariaLabel: String?
+    /// Children in back-to-front render order.
+    let children: [NativeViewNode]?
+}
+
+/// Snapshot event payload. Emitted on screen-appeared / idle /
+/// tap / manual triggers.
+struct NativeSnapshotEventData: Encodable {
+    let recorder: String // "native"
+    let width: Int
+    let height: Int
+    let pixelRatio: Double
+    let trigger: String // "screen_appeared" | "idle" | "tap" | "manual"
+    let root: NativeViewNode
+}
+
 // MARK: - Type-erased Encodable
 
 /// Type-erased Encodable wrapper. Lets us put heterogeneous values

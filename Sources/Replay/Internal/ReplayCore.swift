@@ -35,6 +35,7 @@ final class ReplayCore {
     private var lifecycle: LifecycleObserver?
     private var flushTask: Task<Void, Never>?
     private var tapTracker: TapTracker?
+    private var snapshotCapture: SnapshotCapture?
 
     /// Mirrors the Android SDK's `init` — sets up sender, lifecycle
     /// observer, periodic flush, fires session_start.
@@ -71,6 +72,13 @@ final class ReplayCore {
             }
             tracker.attach()
             self.tapTracker = tracker
+
+            // Snapshot pipeline. Tree-only in this commit; bitmap
+            // capture + asset upload land in the follow-up.
+            let snapshot = SnapshotCapture { [weak self] snap in
+                self?.emitSnapshot(snap)
+            }
+            self.snapshotCapture = snapshot
 
             // Periodic flush. Cancelled on stop(). Runs detached so
             // it doesn't pin a Task tree to the caller.
@@ -179,21 +187,36 @@ final class ReplayCore {
         ReplayLog.verbose("stub: \(call) (engine not yet wired)")
     }
 
-    // MARK: - Tap relay
+    // MARK: - Tap + snapshot relay
 
     private func emitTap(_ tap: TapEventData) {
         queue.sync {
             guard let rt = runtime else { return }
             pushLocked(rt: rt, type: "tap", data: tap)
         }
+        // Tap → schedule an idle snapshot 500ms later to catch
+        // any post-interaction state change (modal opens, list
+        // scrolls). Coalesced via SnapshotCapture's generation
+        // counter so rapid-fire taps collapse to ONE snapshot.
+        snapshotCapture?.scheduleIdle()
+    }
+
+    private func emitSnapshot(_ snap: NativeSnapshotEventData) {
+        queue.sync {
+            guard let rt = runtime else { return }
+            pushLocked(rt: rt, type: "native_snapshot", data: snap)
+        }
     }
 
     /// Wired by `Replay.tagScreenName`. Updates the tracker's route
-    /// so subsequent taps carry the new screen name in uiId.
+    /// so subsequent taps carry the new screen name in uiId. Also
+    /// fires an immediate snapshot so the dashboard sees the tagged
+    /// screen with its new identity.
     func setRoute(_ route: String) {
         queue.sync {
             tapTracker?.currentRoute = route
         }
+        snapshotCapture?.captureNow(trigger: "manual")
     }
 
     // MARK: - Locked helpers (call from `queue.sync` only)
