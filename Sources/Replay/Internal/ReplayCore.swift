@@ -32,6 +32,7 @@ final class ReplayCore {
     private var config: ReplayConfig?
     private var runtime: SessionRuntime?
     private var sender: BatchSender?
+    private var uploader: BatchUploader?
     private var lifecycle: LifecycleObserver?
     private var flushTask: Task<Void, Never>?
     private var tapTracker: TapTracker?
@@ -49,6 +50,17 @@ final class ReplayCore {
             self.config = config
             let sender = BatchSender(config: config)
             self.sender = sender
+            // Wrap with the persistent-queue uploader. flushNow goes
+            // through this so failed batches land on disk and get
+            // drained on next foreground.
+            self.uploader = BatchUploader(config: config, sender: sender)
+            // One-shot drain attempt to pick up any batches queued
+            // during a previous process lifetime. Fire-and-forget;
+            // don't block start.
+            let initialUploader = self.uploader
+            Task.detached(priority: .utility) {
+                await initialUploader?.drain()
+            }
 
             if let distinctId = config.distinctId {
                 sender.identity = IdentifyPayload(
@@ -146,6 +158,14 @@ final class ReplayCore {
             guard config != nil else { return }
             guard runtime == nil else { return }
             startNewSessionLocked()
+        }
+        // Foregrounding is the right moment to drain anything left
+        // on disk from a previous session (live failure during the
+        // last background, or a process kill). Fire-and-forget;
+        // doesn't block the new session's startup.
+        let uploaderSnap = queue.sync { self.uploader }
+        Task.detached(priority: .utility) {
+            await uploaderSnap?.drain()
         }
     }
 
@@ -262,14 +282,13 @@ final class ReplayCore {
         }
     }
 
-    /// Drain + POST. Async to support `URLSession.data(for:)`.
-    /// Locks briefly to snapshot the runtime + sender refs, then
-    /// runs the network call outside the lock.
+    /// Drain + POST via the queue-aware uploader. Failed live sends
+    /// are persisted to disk and drained on next foreground.
     private func flushNow() async {
-        let (rt, sender, projectId): (SessionRuntime?, BatchSender?, String?) = queue.sync {
-            (self.runtime, self.sender, self.config?.projectId)
+        let (rt, uploader, projectId): (SessionRuntime?, BatchUploader?, String?) = queue.sync {
+            (self.runtime, self.uploader, self.config?.projectId)
         }
-        guard let rt, let sender else { return }
+        guard let rt, let uploader else { return }
         let events = rt.drain()
         guard !events.isEmpty else { return }
         let envelope = ReplayBatchEnvelope(
@@ -282,7 +301,7 @@ final class ReplayCore {
             events: events,
             projectId: projectId
         )
-        await sender.send(envelope)
+        await uploader.upload(envelope)
     }
 
     /// Coerce arbitrary track-property values into JSON-safe shapes.

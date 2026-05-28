@@ -23,7 +23,11 @@ Android SDK's incremental rollout:
   `UIView.drawHierarchy`, SHA-256 hashed, uploaded to
   `/v1/replay/assets/:hash`, embedded as `root.imageRef`. Player
   renders pixel-accurate playback.
-- ⏳ Persistent upload queue — background URLSession + on-disk persistence
+- ✅ Persistent upload queue — failed live batches persist to
+  `Application Support/replay-queue/`. Drains on every foreground
+  via the lifecycle observer. Capped at 500 queued files / ~25 MB.
+  iOS has no WorkManager equivalent so v1 is foreground-only;
+  BGTaskScheduler integration is a follow-up.
 - ⏳ Network capture — `URLProtocol` swizzle
 - ⏳ Crash handler — `NSSetUncaughtExceptionHandler` + signal handlers
 - ⏳ Occlusion / privacy views
