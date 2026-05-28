@@ -30,8 +30,19 @@ Android SDK's incremental rollout:
   BGTaskScheduler integration is a follow-up.
 - ⏳ Network capture — `URLProtocol` swizzle
 - ⏳ Crash handler — `NSSetUncaughtExceptionHandler` + signal handlers
-- ⏳ Occlusion / privacy views
-- ⏳ Native performance metrics (cold_start_ms, frame drops, memory, etc.)
+- ✅ Occlusion / privacy views — `Replay.addPrivacyView(_:)` marks a
+  UIView (and all descendants) sensitive. Tap events get `isSensitive`
+  with metadata blanked, view-tree nodes get `occluded`, BitmapCapture
+  paints a diagonal-stripe overlay over the region inside the captured
+  PNG. Triple-layer defense.
+- ✅ Native performance metrics — `cold_start_ms` (one-shot first
+  foreground), `frame_drop_pct` + `frozen_frame_count` (CADisplayLink
+  10s rolling window), `memory_rss_mb` (mach_task_basic_info every
+  30s), `thermal_state` (ProcessInfo notification on change). Ships
+  as `performance` events with the same `kind:"perf"` shape the web
+  SDK uses — backend's existing classifier handles them. Deferred:
+  `tap_response_ms`, `first_network_ttfb_ms`, `battery_drain_pct_per_min`,
+  `time_to_first_meaningful_render_ms` (need other hooks first).
 - ⏳ SwiftUI view modifiers (`.replayOcclude()` / `.replayTagScreenName()`)
 
 Each ⏳ corresponds to a follow-up commit; see the design docs in

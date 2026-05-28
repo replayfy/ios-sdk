@@ -37,6 +37,7 @@ final class ReplayCore {
     private var flushTask: Task<Void, Never>?
     private var tapTracker: TapTracker?
     private var snapshotCapture: SnapshotCapture?
+    private var perfMetrics: PerfMetricsManager?
 
     /// Mirrors the Android SDK's `init` — sets up sender, lifecycle
     /// observer, periodic flush, fires session_start.
@@ -103,6 +104,17 @@ final class ReplayCore {
             }
             self.snapshotCapture = snapshot
 
+            // Native perf metrics — cold_start_ms, frame_drop_pct,
+            // frozen_frame_count, memory_rss_mb, thermal_state.
+            // Cold start is reported separately from onAppForegrounded
+            // so we capture the cold-launch → user-sees-app delay,
+            // not just process spin-up.
+            let perf = PerfMetricsManager { [weak self] event in
+                self?.emitPerformance(event)
+            }
+            perf.start()
+            self.perfMetrics = perf
+
             // Periodic flush. Cancelled on stop(). Runs detached so
             // it doesn't pin a Task tree to the caller.
             let interval = config.flushInterval
@@ -166,6 +178,12 @@ final class ReplayCore {
             guard runtime == nil else { return }
             startNewSessionLocked()
         }
+        // Cold-start measurement — emit once per process. The
+        // measurement runs ReplayCore.init → first foreground,
+        // which approximates didFinishLaunching → first frame
+        // visible to the user. Idempotent (returns nil after the
+        // first call), so duplicate foregrounds don't re-emit.
+        perfMetrics?.reportFirstForeground()
         // Foregrounding is the right moment to drain anything left
         // on disk from a previous session (live failure during the
         // last background, or a process kill). Fire-and-forget;
@@ -206,6 +224,11 @@ final class ReplayCore {
             flushTask = nil
             runtime = nil
         }
+        // Stop background perf collectors — frame-link callback,
+        // memory timer, thermal notification observer. Restarts on
+        // next start() call.
+        perfMetrics?.stop()
+        perfMetrics = nil
     }
 
     var isRecording: Bool {
@@ -230,6 +253,13 @@ final class ReplayCore {
         // scrolls). Coalesced via SnapshotCapture's generation
         // counter so rapid-fire taps collapse to ONE snapshot.
         snapshotCapture?.scheduleIdle()
+    }
+
+    private func emitPerformance(_ perf: PerformanceEventData) {
+        queue.sync {
+            guard let rt = runtime else { return }
+            pushLocked(rt: rt, type: "performance", data: perf)
+        }
     }
 
     private func emitSnapshot(_ snap: NativeSnapshotEventData) {

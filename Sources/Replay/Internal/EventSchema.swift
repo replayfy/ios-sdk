@@ -200,6 +200,22 @@ struct NativeSnapshotEventData: Encodable {
     let root: NativeViewNode
 }
 
+/// Performance event — same `kind: "perf"` envelope the web SDK
+/// emits; backend's countEvents switch dispatches on `metric`.
+///
+/// Metric names defined in mobile-vitals-matrix.md. Backend has
+/// columns for: cold_start_ms, first_meaningful_render_ms,
+/// worst_tap_response_ms, first_network_ttfb_ms, worst_frame_drop_pct
+/// (×100 int), frozen_frame_count, anr_count, worst_memory_rss_mb,
+/// worst_thermal_state, battery_drain_pct_per_min (×100 int).
+struct PerformanceEventData: Encodable {
+    let kind: String // "perf"
+    let metric: String
+    let value: Double
+    let unit: String // "ms" | "mb" | "pct" | "count" | ""
+    let rating: String? // "good" | "needs-improvement" | "poor"
+}
+
 // MARK: - Type-erased Encodable
 
 /// Type-erased Encodable wrapper. Lets us put heterogeneous values
