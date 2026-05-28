@@ -38,6 +38,7 @@ final class ReplayCore {
     private var tapTracker: TapTracker?
     private var snapshotCapture: SnapshotCapture?
     private var perfMetrics: PerfMetricsManager?
+    private var crashHandler: CrashHandler?
 
     /// Mirrors the Android SDK's `init` — sets up sender, lifecycle
     /// observer, periodic flush, fires session_start.
@@ -114,6 +115,20 @@ final class ReplayCore {
             }
             perf.start()
             self.perfMetrics = perf
+
+            // Crash handler — install last so previous-launch crash
+            // records get drained AFTER the runtime is up but
+            // BEFORE the periodic flush task starts (so the
+            // recovered crash event lands in the first batch).
+            // Only install when the customer hasn't opted out via
+            // config.captureErrors.
+            if config.captureErrors {
+                let crash = CrashHandler { [weak self] record in
+                    self?.emitRecoveredCrash(record)
+                }
+                crash.install()
+                self.crashHandler = crash
+            }
 
             // Periodic flush. Cancelled on stop(). Runs detached so
             // it doesn't pin a Task tree to the caller.
@@ -253,6 +268,23 @@ final class ReplayCore {
         // scrolls). Coalesced via SnapshotCapture's generation
         // counter so rapid-fire taps collapse to ONE snapshot.
         snapshotCapture?.scheduleIdle()
+    }
+
+    /// Surface a previous-launch crash as an `error` event on the
+    /// current session. We use the standard error type so the
+    /// backend's existing errorCount + dashboard error filtering
+    /// just works — `kind:"crash"` discriminates from regular
+    /// errors when the customer wants to filter to crashes only.
+    private func emitRecoveredCrash(_ record: CrashRecord) {
+        let data = CrashEventData(
+            kind: "crash",
+            message: "\(record.detail)",
+            stack: nil
+        )
+        queue.sync {
+            guard let rt = runtime else { return }
+            pushLocked(rt: rt, type: "error", data: data)
+        }
     }
 
     private func emitPerformance(_ perf: PerformanceEventData) {

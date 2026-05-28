@@ -200,6 +200,18 @@ struct NativeSnapshotEventData: Encodable {
     let root: NativeViewNode
 }
 
+/// Crash event — emitted on next launch after a previous-process
+/// crash. Ships as the standard `error` event type so the backend's
+/// existing `errorCount` counter increments correctly; the `kind`
+/// field discriminates from regular JS-style errors ("error",
+/// "unhandledrejection") and lets the dashboard filter to crashes
+/// specifically.
+struct CrashEventData: Encodable {
+    let kind: String     // "crash"
+    let message: String  // "SIGSEGV" / "NSInvalidArgumentException:..."
+    let stack: String?   // null in v1 — no PLCrashReporter integration yet
+}
+
 /// Performance event — same `kind: "perf"` envelope the web SDK
 /// emits; backend's countEvents switch dispatches on `metric`.
 ///

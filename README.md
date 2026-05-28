@@ -29,7 +29,15 @@ Android SDK's incremental rollout:
   iOS has no WorkManager equivalent so v1 is foreground-only;
   BGTaskScheduler integration is a follow-up.
 - ⏳ Network capture — `URLProtocol` swizzle
-- ⏳ Crash handler — `NSSetUncaughtExceptionHandler` + signal handlers
+- ✅ Crash handler — `NSSetUncaughtExceptionHandler` catches Obj-C
+  exceptions; `sigaction` handlers catch SIGSEGV/SIGABRT/SIGBUS/
+  SIGFPE/SIGILL/SIGTRAP. Signal handler writes a tiny ASCII record
+  via async-signal-safe `open()` + `write()` (no allocations, no
+  Swift runtime). Next launch reads the record + emits as an
+  `error` event with `kind:"crash"`. Previous handlers chained
+  (Crashlytics/Sentry still fire); default re-raised so the OS
+  still produces its normal crash report. No PLCrashReporter
+  integration in v1 — symbolicated stack traces are a follow-up.
 - ✅ Occlusion / privacy views — `Replay.addPrivacyView(_:)` marks a
   UIView (and all descendants) sensitive. Tap events get `isSensitive`
   with metadata blanked, view-tree nodes get `occluded`, BitmapCapture
