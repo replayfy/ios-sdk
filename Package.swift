@@ -29,15 +29,30 @@ let package = Package(
         ),
     ],
     dependencies: [
-        // No external runtime dependencies. URLSession + Foundation
-        // + UIKit cover everything we need. Keeping the dep graph
-        // empty also means no transitive version conflicts in the
-        // host app — UXCam took the same approach.
+        // PLCrashReporter — the canonical iOS crash-capture library
+        // (originally Plausible Labs, now maintained by Microsoft).
+        // Catches Mach exceptions (EXC_BAD_ACCESS, EXC_BAD_INSTRUCTION,
+        // EXC_CRASH) on top of POSIX signals (SIGSEGV/SIGBUS/SIGABRT/
+        // SIGFPE), writes async-signal-safe crash dumps, and
+        // symbolicates frames. Our previous hand-rolled NSException +
+        // sigaction handler covered ~70% of crash modes; PLCrashReporter
+        // covers ~99%. Brought in as SwiftPM transitive dep — adds
+        // ~150 KB to the binary, no other runtime deps.
+        //
+        // UXCam ships PLCrashReporter symbols inside their iOS binary
+        // (verified via `nm`), so this puts us at parity on iOS
+        // crash reliability.
+        .package(
+            url: "https://github.com/microsoft/plcrashreporter.git",
+            from: "1.12.0"
+        ),
     ],
     targets: [
         .target(
             name: "Replay",
-            dependencies: [],
+            dependencies: [
+                .product(name: "CrashReporter", package: "plcrashreporter"),
+            ],
             path: "Sources/Replay"
         ),
         .target(

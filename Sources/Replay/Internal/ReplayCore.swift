@@ -46,11 +46,19 @@ final class ReplayCore {
     /// ContentProvider auto-bootstrap that runs before
     /// `Application.onCreate`, so the gap between `Replay.start`
     /// and the first `UIApplication.didBecomeActiveNotification`
-    /// can swallow any identify/track/console call made from
-    /// `viewDidLoad` / `init`. These buffers preserve them; flushed
-    /// in `startNewSessionLocked` once the runtime materialises.
+    /// can swallow any event call made from `viewDidLoad` / `init`
+    /// OR from collector boot-time emits (ThermalMonitor.start
+    /// immediately emits the baseline thermal_state; BatteryMonitor
+    /// the baseline battery state; both fire from inside
+    /// `perfMetrics.start()` which runs DURING Replay.start before
+    /// onAppForegrounded creates the runtime).
+    ///
+    /// These buffers preserve them; flushed in `startNewSessionLocked`
+    /// once the runtime materialises. 200-event cap each to prevent
+    /// runaway accumulation if foreground never fires.
     private var pendingTracks: [CustomEventData] = []
     private var pendingConsole: [ConsoleEventData] = []
+    private var pendingPerf: [PerformanceEventData] = []
 
     /// Mirrors the Android SDK's `init` — sets up sender, lifecycle
     /// observer, periodic flush, fires session_start.
@@ -351,10 +359,15 @@ final class ReplayCore {
     /// just works — `kind:"crash"` discriminates from regular
     /// errors when the customer wants to filter to crashes only.
     private func emitRecoveredCrash(_ record: CrashRecord) {
+        // Stack from PLCrashReporter is multi-line formatted text
+        // (thread states + register dumps + symbolicated frames).
+        // Ship it raw — backend stores as TEXT and the dashboard's
+        // Crashes panel renders it inside a <pre>. Legacy records
+        // from the previous SDK lifecycle carry stack=nil.
         let data = CrashEventData(
             kind: "crash",
-            message: "\(record.detail)",
-            stack: nil
+            message: record.detail,
+            stack: record.stack
         )
         // `async` for the same reason as emitPerformance: this is
         // called inline from CrashHandler.install (during start) which
@@ -398,17 +411,31 @@ final class ReplayCore {
     }
 
     /// Use `async` not `sync` here because perf collectors may emit
-    /// during `Replay.start` itself (e.g. `ThermalMonitor.start()`
-    /// immediately emits the current state) — that path holds the
-    /// `queue.sync` lock already, so a nested `queue.sync` would
-    /// dispatch-deadlock (libdispatch traps with "Abort Cause"
-    /// 27021769562915074). Async re-entry just enqueues and runs
-    /// after the current sync block completes; serial queue
-    /// preserves ordering.
+    /// during `Replay.start` itself (e.g. `ThermalMonitor.start()` /
+    /// `BatteryMonitor.start()` both immediately emit baselines) —
+    /// that path holds the `queue.sync` lock already, so a nested
+    /// `queue.sync` would dispatch-deadlock (libdispatch traps with
+    /// "Abort Cause" 27021769562915074). Async re-entry just
+    /// enqueues and runs after the current sync block completes;
+    /// serial queue preserves ordering.
+    ///
+    /// Pre-runtime events buffer in `pendingPerf` and replay in
+    /// `startNewSessionLocked` — same pattern as track + console.
+    /// Without this buffer the very first cold_start_ms +
+    /// thermal_state + battery_state emits get silently dropped
+    /// because they fire during Replay.start, BEFORE the first
+    /// `UIApplication.didBecomeActiveNotification` creates the
+    /// runtime.
     private func emitPerformance(_ perf: PerformanceEventData) {
         queue.async {
-            guard let rt = self.runtime else { return }
-            self.pushLocked(rt: rt, type: "performance", data: perf)
+            if let rt = self.runtime {
+                self.pushLocked(rt: rt, type: "performance", data: perf)
+            } else {
+                self.pendingPerf.append(perf)
+                if self.pendingPerf.count > 200 {
+                    self.pendingPerf.removeFirst(self.pendingPerf.count - 200)
+                }
+            }
         }
     }
 
@@ -470,6 +497,12 @@ final class ReplayCore {
                 pushLocked(rt: rt, type: "console", data: ev)
             }
             pendingConsole.removeAll()
+        }
+        if !pendingPerf.isEmpty {
+            for ev in pendingPerf {
+                pushLocked(rt: rt, type: "performance", data: ev)
+            }
+            pendingPerf.removeAll()
         }
     }
 

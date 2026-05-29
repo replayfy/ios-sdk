@@ -30,6 +30,9 @@ final class PerfMetricsManager {
     private let memory: MemoryPoller
     private let thermal: ThermalMonitor
     private let hang: HangWatchdog
+    #if canImport(UIKit)
+    private let battery: BatteryMonitor
+    #endif
 
     init(onMetric: @escaping (PerformanceEventData) -> Void) {
         self.onMetric = onMetric
@@ -70,6 +73,13 @@ final class PerfMetricsManager {
                 rating: rating
             ))
         }
+        #if canImport(UIKit)
+        self.battery = BatteryMonitor { metric, value, unit, rating in
+            onMetric(PerformanceEventData(
+                kind: "perf", metric: metric, value: value, unit: unit, rating: rating
+            ))
+        }
+        #endif
     }
 
     /// Start every collector. Called from ``ReplayCore/start``
@@ -79,6 +89,9 @@ final class PerfMetricsManager {
         memory.start()
         thermal.start()
         hang.start()
+        #if canImport(UIKit)
+        battery.start()
+        #endif
         // Cold start fires once on first foreground; ReplayCore
         // calls reportFirstForeground from its lifecycle hook so
         // we measure cold-launch → user-sees-app time, not just
@@ -91,6 +104,9 @@ final class PerfMetricsManager {
         memory.stop()
         thermal.stop()
         hang.stop()
+        #if canImport(UIKit)
+        battery.stop()
+        #endif
     }
 
     /// Emit the cold-start metric exactly once per process. Idempotent
