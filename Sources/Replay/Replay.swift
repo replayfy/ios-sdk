@@ -129,4 +129,24 @@ public enum Replay {
     public static func cancelSession() {
         ReplayCore.shared.stub("cancelSession")
     }
+
+    /// Bridge customer-side logging into the SDK's console-event
+    /// stream. `print()` / `NSLog()` are captured automatically when
+    /// `captureConsole = true`. Use this entry point for loggers
+    /// that don't write to STDOUT/STDERR — `Logger`, `os_log`,
+    /// CocoaLumberjack, SwiftyBeaver, custom systems.
+    ///
+    /// Mirrors the Android SDK's `Replay.log(level, message, stack)`.
+    ///
+    /// - Parameters:
+    ///   - level:   "log" | "info" | "warn" | "error" | "debug"
+    ///   - message: Free-text log line.
+    ///   - stack:   Optional stack trace (for exception logs).
+    public static func log(
+        level: String,
+        message: String,
+        stack: String? = nil
+    ) {
+        ReplayCore.shared.logExplicit(level: level, message: message, stack: stack)
+    }
 }

@@ -220,6 +220,20 @@ struct NetworkEventData: Encodable {
     let error: String?
 }
 
+/// Console log event — mirrors the web SDK's `ConsoleEventData`
+/// + Android's so the dashboard Console panel renders all three
+/// platforms uniformly.
+///
+/// `args` ships as `[String]` for native (vs the web SDK's typed
+/// `unknown[]`) because Swift can't safely round-trip arbitrary
+/// types through JSON; the dashboard treats both the same way.
+struct ConsoleEventData: Encodable {
+    let level: String  // "log" | "info" | "warn" | "error" | "debug"
+    let message: String
+    let args: [String]
+    let stack: String?
+}
+
 /// Crash event — emitted on next launch after a previous-process
 /// crash. Ships as the standard `error` event type so the backend's
 /// existing `errorCount` counter increments correctly; the `kind`

@@ -38,6 +38,22 @@ final class MainViewController: UIViewController {
         // events. Equivalent of Android's tagScreenName(name).
         Replay.tagScreenName("MainViewController")
 
+        // identify + track validation — exercise the public-API
+        // surface in the example app so the smoke test proves
+        // both round-trip to the dashboard.
+        Replay.identify("smoke-test-ios-user", properties: [
+            "plan": "free",
+            "device_class": "test-simulator",
+        ])
+        Replay.track("example_app_launched", properties: [
+            "platform": "ios",
+        ])
+        // Console capture validation — STDOUT print + NSLog (STDERR)
+        // both routed through ConsoleCapture's dup2 pipe.
+        print("[smoke-test] stdout print() captured by ConsoleCapture")
+        NSLog("[smoke-test] NSLog (stderr) captured by ConsoleCapture")
+        Replay.log(level: "warn", message: "[smoke-test] explicit Replay.log call")
+
         let scroll = UIScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
@@ -125,6 +141,8 @@ final class MainViewController: UIViewController {
     @objc private func handleTap(_ sender: UIButton) {
         tapCount += 1
         tapLabel.text = "Taps recorded: \(tapCount)"
+        Replay.track("tap_me_clicked", properties: ["count": tapCount])
+        Replay.log(level: "info", message: "[smoke-test] tap_me_clicked count=\(tapCount)")
     }
 
     @objc private func handleHang() {

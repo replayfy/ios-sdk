@@ -39,6 +39,18 @@ final class ReplayCore {
     private var snapshotCapture: SnapshotCapture?
     private var perfMetrics: PerfMetricsManager?
     private var crashHandler: CrashHandler?
+    private var consoleCapture: ConsoleCapture?
+
+    /// Events captured before the first foreground (== before
+    /// `runtime` exists). iOS has no equivalent of Android's
+    /// ContentProvider auto-bootstrap that runs before
+    /// `Application.onCreate`, so the gap between `Replay.start`
+    /// and the first `UIApplication.didBecomeActiveNotification`
+    /// can swallow any identify/track/console call made from
+    /// `viewDidLoad` / `init`. These buffers preserve them; flushed
+    /// in `startNewSessionLocked` once the runtime materialises.
+    private var pendingTracks: [CustomEventData] = []
+    private var pendingConsole: [ConsoleEventData] = []
 
     /// Mirrors the Android SDK's `init` — sets up sender, lifecycle
     /// observer, periodic flush, fires session_start.
@@ -130,6 +142,18 @@ final class ReplayCore {
                 self.crashHandler = crash
             }
 
+            // Console capture — STDOUT + STDERR pipe via dup2.
+            // `print()` / `NSLog()` lines ship as console events.
+            // Customers using `Logger` / `os_log` bridge via
+            // `Replay.log(level:message:stack:)` explicitly.
+            if config.captureConsole {
+                let console = ConsoleCapture { [weak self] event in
+                    self?.emitConsole(event)
+                }
+                console.start()
+                self.consoleCapture = console
+            }
+
             // Network capture via URLProtocol — auto-installs on
             // URLSession.shared + deprecated NSURLConnection. Off
             // by default (PII risk); flip ReplayConfig(captureNetwork:
@@ -190,16 +214,21 @@ final class ReplayCore {
         let safeName = String(trimmed.prefix(80))
 
         queue.sync {
-            guard let rt = runtime else {
-                ReplayLog.warn("track before start — dropping '\(safeName)'")
-                return
-            }
             let data = CustomEventData(
                 kind: "track",
                 name: safeName,
                 properties: safeProps(properties)
             )
-            pushLocked(rt: rt, type: "custom", data: data)
+            if let rt = runtime {
+                pushLocked(rt: rt, type: "custom", data: data)
+            } else {
+                // Pre-runtime — buffer for replay on first session
+                // start. Customer-side calls in `viewDidLoad`/`init`
+                // fire BEFORE the app's first didBecomeActive
+                // notification creates the runtime; without this
+                // buffer those events would be silently dropped.
+                pendingTracks.append(data)
+            }
         }
     }
 
@@ -271,12 +300,25 @@ final class ReplayCore {
         // next start() call.
         perfMetrics?.stop()
         perfMetrics = nil
+        // Restore original STDOUT / STDERR. Best-effort — dup2
+        // failures during shutdown are logged + ignored by
+        // ConsoleCapture.stop().
+        consoleCapture?.stop()
+        consoleCapture = nil
         // Network capture cleanup — clear the emit closure so any
         // in-flight requests' completion handlers don't push events
         // into the stopped runtime. Unregister the protocol too;
         // re-registration is cheap if start() is called again.
         URLSessionCapture.emit = nil
         URLSessionCapture.uninstall()
+    }
+
+    /// Bridge for the public `Replay.log(...)` entry point.
+    /// Forwards to `ConsoleCapture.emitExplicit` so customer-side
+    /// loggers that don't write through STDOUT/STDERR (`Logger`,
+    /// `os_log`, CocoaLumberjack, etc.) can still feed the dashboard.
+    func logExplicit(level: String, message: String, stack: String?) {
+        consoleCapture?.emitExplicit(level: level, message: message, stack: stack)
     }
 
     var isRecording: Bool {
@@ -328,6 +370,30 @@ final class ReplayCore {
         queue.async {
             guard let rt = self.runtime else { return }
             self.pushLocked(rt: rt, type: "network", data: event)
+        }
+    }
+
+    /// Console output captured from STDOUT / STDERR (or explicit
+    /// `Replay.log` calls). `async` for the same re-entrancy reason
+    /// as emitPerformance — the customer's print() could fire from
+    /// any thread, including one already inside queue.sync. Pre-
+    /// runtime events buffer in `pendingConsole` + replay in
+    /// `startNewSessionLocked`.
+    private func emitConsole(_ event: ConsoleEventData) {
+        queue.async {
+            if let rt = self.runtime {
+                self.pushLocked(rt: rt, type: "console", data: event)
+            } else {
+                self.pendingConsole.append(event)
+                // Cap the pre-runtime buffer at 200 events so an
+                // app that hangs forever before foreground (rare,
+                // but possible during cold launches with heavy
+                // splash logic) doesn't accumulate megabytes of
+                // dropped log lines.
+                if self.pendingConsole.count > 200 {
+                    self.pendingConsole.removeFirst(self.pendingConsole.count - 200)
+                }
+            }
         }
     }
 
@@ -387,6 +453,24 @@ final class ReplayCore {
             referrer: ""
         )
         pushLocked(rt: rt, type: "session_start", data: data)
+
+        // Replay any track / console events that fired BEFORE the
+        // runtime existed (viewDidLoad / init calls that ran before
+        // the first didBecomeActive notification). Order preserved
+        // via FIFO drain. Once flushed the pending buffers stay
+        // empty for the rest of this process lifetime.
+        if !pendingTracks.isEmpty {
+            for ev in pendingTracks {
+                pushLocked(rt: rt, type: "custom", data: ev)
+            }
+            pendingTracks.removeAll()
+        }
+        if !pendingConsole.isEmpty {
+            for ev in pendingConsole {
+                pushLocked(rt: rt, type: "console", data: ev)
+            }
+            pendingConsole.removeAll()
+        }
     }
 
     private func pushLocked<T: Encodable>(rt: SessionRuntime, type: String, data: T) {
