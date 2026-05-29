@@ -162,6 +162,24 @@ final class ReplayCore {
                 self.consoleCapture = console
             }
 
+            // Auto-detect screen names — UIViewController.viewDidAppear
+            // swizzle reports the foremost VC's class name as the
+            // current route. Mirrors Android's
+            // TapTracker.updateRoute(activity.javaClass.simpleName).
+            // Customers opt out with ReplayConfig(autoScreenName:false)
+            // + drive routes manually via Replay.tagScreenName.
+            //
+            // Must run on the main thread (UIKit class swizzle).
+            // Since Replay.start typically runs from
+            // application(_:didFinishLaunchingWithOptions:) which IS
+            // main, this is safe.
+            if config.autoScreenName {
+                ScreenAutoDetector.onScreenChange = { [weak self] name in
+                    self?.setRoute(name)
+                }
+                ScreenAutoDetector.enable()
+            }
+
             // Network capture via URLProtocol — auto-installs on
             // URLSession.shared + deprecated NSURLConnection. Off
             // by default (PII risk); flip ReplayConfig(captureNetwork:

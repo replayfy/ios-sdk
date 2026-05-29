@@ -53,6 +53,19 @@ public struct ReplayConfig {
     /// but visually plain. On → pixel-accurate via the asset endpoint.
     public let captureSnapshotPixels: Bool
 
+    /// Auto-detect screen names by swizzling
+    /// `UIViewController.viewDidAppear`. When true (default),
+    /// the current route is automatically the class name of the
+    /// foremost VC — no need to call `Replay.tagScreenName` per
+    /// screen. Manual `tagScreenName(...)` calls still take
+    /// precedence until the next auto-detected change.
+    ///
+    /// Mirrors Android's same-named flag (default-on). Apps using
+    /// custom container hierarchies that don't extend the standard
+    /// UIViewController lifecycle should opt out here + call
+    /// `tagScreenName` explicitly.
+    public let autoScreenName: Bool
+
     public init(
         apiKey: String,
         apiHost: String,
@@ -66,7 +79,8 @@ public struct ReplayConfig {
         captureErrors: Bool = true,
         captureHeaders: Bool = false,
         maxBodyBytes: Int = 4_096,
-        captureSnapshotPixels: Bool = true
+        captureSnapshotPixels: Bool = true,
+        autoScreenName: Bool = true
     ) {
         self.apiKey = apiKey
         self.apiHost = apiHost
@@ -81,5 +95,6 @@ public struct ReplayConfig {
         self.captureHeaders = captureHeaders
         self.maxBodyBytes = maxBodyBytes
         self.captureSnapshotPixels = captureSnapshotPixels
+        self.autoScreenName = autoScreenName
     }
 }
