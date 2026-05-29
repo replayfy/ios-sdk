@@ -94,18 +94,55 @@ final class ThumbnailUploader {
         request.setValue(config.apiKey, forHTTPHeaderField: "x-replay-api-key")
 
         do {
-            let (_, response) = try await session.data(for: request)
-            // Backend returns 200 even on R2-disabled dev (the
-            // response body has ok:false). We don't bother
-            // parsing — best-effort, dashboard falls back to a
-            // blank card if the URL never lands on Session.
-            _ = response
+            let (responseBody, response) = try await session.data(for: request)
+            // Backend returns HTTP 200 even on logical failure
+            // (R2 not configured, session row not yet created on
+            // the server because the first snapshot raced ahead of
+            // the session_start batch, etc.) — the real success
+            // signal lives in the JSON body's nested `data.ok`.
+            // Parse + only mark sent when ok=true AND a real URL
+            // came back, otherwise flip the flag back so the next
+            // snapshot retries.
+            //
+            // Mirrors the Android SDK's ThumbnailUploader.kt fix
+            // (commit 839f7da). Closes the same race where iOS
+            // sessions never got thumbnails.
+            let ok = isHttpSuccess(response) && responseBodyOk(responseBody)
+            if !ok {
+                lock.withLock { _alreadySent = false }
+            }
         } catch {
             // Network error — flip the flag back so next snapshot
             // retries the thumbnail upload.
             lock.withLock { _alreadySent = false }
             ReplayLog.verbose("thumbnail upload failed: \(error.localizedDescription)")
         }
+    }
+
+    /// HTTP 2xx success — extracted for testability.
+    private func isHttpSuccess(_ response: URLResponse) -> Bool {
+        guard let http = response as? HTTPURLResponse else { return false }
+        return (200...299).contains(http.statusCode)
+    }
+
+    /// Parse the standard ingest envelope `{ok, data: {ok, url?}, meta}`.
+    /// The inner `data.ok` is the authoritative signal for THIS
+    /// endpoint — outer `ok` only confirms the request was routed.
+    /// Returns true when the endpoint actually stored a thumbnail URL.
+    private func responseBodyOk(_ body: Data) -> Bool {
+        guard !body.isEmpty,
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        else { return false }
+        // Standard ingest shape: { ok, data: { ok, url, ... }, meta }
+        if let inner = json["data"] as? [String: Any] {
+            let innerOk = inner["ok"] as? Bool ?? false
+            let urlStr = inner["url"] as? String
+            return innerOk && (urlStr?.isEmpty == false)
+        }
+        // Plain `{ ok, url }` shape — also accept.
+        let outerOk = json["ok"] as? Bool ?? false
+        let urlStr = json["url"] as? String
+        return outerOk && (urlStr?.isEmpty == false)
     }
 
     /// Downsize the captured UIImage to thumbnail dimensions and

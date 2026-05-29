@@ -225,6 +225,15 @@ final class ReplayCore {
         Task.detached(priority: .utility) {
             await uploaderSnap?.drain()
         }
+        // Fire a snapshot on foreground transition — mirrors the
+        // Android SDK's `screen_appeared` trigger. Gives the
+        // dashboard at least one snapshot per session even when the
+        // customer never calls tagScreenName and the session ends
+        // without any taps. ALSO drives the thumbnail-retry path:
+        // if the first snapshot's thumbnail upload raced ahead of
+        // the session row's creation, the second snapshot will
+        // catch up.
+        snapshotCapture?.captureNow(trigger: "screen_appeared")
     }
 
     private func onAppBackgrounded() {
