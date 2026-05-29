@@ -217,4 +217,38 @@ public final class ReplayBridge: NSObject {
     public static func setSessionProperty(_ key: String, value: Any?) {
         Replay.setSessionProperty(key, value: value)
     }
+
+    /// `[Replay setAutomaticScreenNameTagging: NO]`
+    @objc(setAutomaticScreenNameTagging:)
+    public static func setAutomaticScreenNameTagging(_ enabled: Bool) {
+        Replay.setAutomaticScreenNameTagging(enabled)
+    }
+
+    /// `[Replay setPushNotificationToken:@"abc..." platform:@"apns"]`
+    @objc(setPushNotificationToken:platform:)
+    public static func setPushNotificationToken(_ token: String, platform: String) {
+        Replay.setPushNotificationToken(token, platform: platform)
+    }
+
+    /// `[Replay markSessionAsFavorite]`
+    @objc public static func markSessionAsFavorite() {
+        Replay.markSessionAsFavorite()
+    }
+
+    /// `[Replay addTagWithProperties:@"holiday_flow" properties:@{...}]`
+    @objc(addTagWithProperties:properties:)
+    public static func addTagWithProperties(_ name: String, properties: [String: Any]?) {
+        Replay.addTagWithProperties(name, properties: properties)
+    }
+
+    /// `[Replay startNewSession]`
+    @objc public static func startNewSession() {
+        Replay.startNewSession()
+    }
+
+    /// `[Replay stopApplicationAndUploadDataWithTimeout: 5.0]`
+    @objc(stopApplicationAndUploadDataWithTimeout:)
+    public static func stopApplicationAndUploadData(timeoutSeconds: TimeInterval) {
+        Replay.stopApplicationAndUploadData(timeoutSeconds: timeoutSeconds)
+    }
 }

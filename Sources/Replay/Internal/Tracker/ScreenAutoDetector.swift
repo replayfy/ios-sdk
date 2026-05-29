@@ -38,6 +38,14 @@ final class ScreenAutoDetector {
     /// class name). Wired by ReplayCore to ReplayCore.setRoute.
     static var onScreenChange: ((String) -> Void)?
 
+    /// Runtime kill switch for the auto-tagger. Default-true so the
+    /// existing ReplayConfig.autoScreenName behaviour is preserved
+    /// — flipping to false makes the swizzled viewDidAppear no-op
+    /// without un-swizzling (which is fragile in production). Wired
+    /// from ``Replay/setAutomaticScreenNameTagging(_:)`` so customers
+    /// can toggle per-flow at runtime.
+    static var enabled: Bool = true
+
     /// Has the swizzle been installed? Idempotent — repeated
     /// `enable()` calls are no-ops.
     private static var installed = false
@@ -93,6 +101,10 @@ extension UIViewController {
         // immediately on app launch with empty content sometimes);
         // we'd see it as a noisy duplicate of the real first screen.
         if self.view.window == nil { return }
+        // Runtime kill-switch — customers can flip
+        // Replay.setAutomaticScreenNameTagging(false) for a specific
+        // modal flow and back on when they leave it.
+        if !ScreenAutoDetector.enabled { return }
 
         let name = String(describing: type(of: self))
         ScreenAutoDetector.onScreenChange?(name)

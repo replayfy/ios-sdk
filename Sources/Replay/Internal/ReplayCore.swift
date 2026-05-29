@@ -325,6 +325,159 @@ final class ReplayCore {
         }
     }
 
+    // -----------------------------------------------------------------
+    //  UXCam-parity session-control surface
+    // -----------------------------------------------------------------
+
+    /// Flip the auto-screen-detect swizzle on/off at runtime. Mirrors
+    /// `ReplayConfig.autoScreenName` but at the call site rather than
+    /// init. Lets customers turn auto-tagging off for a specific
+    /// modal flow (where the VC class names don't map to user-meaningful
+    /// screens) and back on when they leave it.
+    ///
+    /// We don't un-swizzle once installed — that's both expensive and
+    /// fragile (race with in-flight viewDidAppear calls). Instead the
+    /// detector consults this flag before notifying us. Same approach
+    /// as Android's TapTracker.autoScreenNameEnabled.
+    func setAutomaticScreenNameTagging(_ enabled: Bool) {
+        #if canImport(UIKit)
+        ScreenAutoDetector.enabled = enabled
+        #endif
+    }
+
+    /// Attach the device's push-notification token to the session.
+    /// Emitted as a custom event so the dashboard can render it as a
+    /// chip on the player header AND use it to deliver push from
+    /// the replay UI (future feature; dashboard side tracked in
+    /// docs/sdk-capture-matrix.md).
+    ///
+    /// `platform` defaults to "apns" on iOS; pass "fcm" if you're
+    /// piping a Firebase token through.
+    func setPushNotificationToken(_ token: String, platform: String = "apns") {
+        let trimmed = token.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        // Cap to 256 chars — APNS hex tokens are 64, FCM are ~152,
+        // anything longer is malformed + we don't want unbounded
+        // memory cost.
+        let safeToken = String(trimmed.prefix(256))
+        let data = CustomEventData(
+            kind: "push_token",
+            name: platform,
+            properties: safeProps(["token": safeToken, "platform": platform])
+        )
+        queue.async {
+            if let rt = self.runtime {
+                self.pushLocked(rt: rt, type: "custom", data: data)
+            } else {
+                self.pendingTracks.append(data)
+            }
+        }
+    }
+
+    /// Flag the current session as favorite — useful for the
+    /// "starred session" filter on the dashboard. Emitted as a
+    /// `session_favorite` custom event so the backend can promote
+    /// the flag onto the Session row when it processes the batch.
+    /// Dashboard wiring tracked separately in the matrix doc.
+    func markSessionAsFavorite() {
+        let data = CustomEventData(
+            kind: "session_favorite",
+            name: "favorite",
+            properties: safeProps(["favorite": true])
+        )
+        queue.async {
+            if let rt = self.runtime {
+                self.pushLocked(rt: rt, type: "custom", data: data)
+            } else {
+                self.pendingTracks.append(data)
+            }
+        }
+    }
+
+    /// Attach a SESSION-level tag with optional properties. Distinct
+    /// from `track()` (which is event-level): UXCam customers use
+    /// session tags for "this session belongs to A/B variant X" or
+    /// "this session is part of the holiday-checkout flow" — values
+    /// that filter the whole session list rather than show up as
+    /// timeline events.
+    ///
+    /// We ship the same custom-event envelope as setSessionProperty;
+    /// kind="session_tag" signals to the backend that it should
+    /// promote the tag into Session.tags (separate Prisma column —
+    /// see docs/sdk-capture-matrix.md for the backend task).
+    func addTagWithProperties(_ name: String, properties: [String: Any]? = nil) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let safeName = String(trimmed.prefix(80))
+        let data = CustomEventData(
+            kind: "session_tag",
+            name: safeName,
+            properties: safeProps(properties)
+        )
+        queue.async {
+            if let rt = self.runtime {
+                self.pushLocked(rt: rt, type: "custom", data: data)
+            } else {
+                self.pendingTracks.append(data)
+            }
+        }
+    }
+
+    /// Force-end the current session + start a fresh one. UXCam's
+    /// `startNewSession()` — used by customers who track logical
+    /// boundaries (user logout → login as different user; A/B
+    /// re-bucketing; "start over" buttons) inside one app process.
+    ///
+    /// Drains the current session's buffer to disk so its events
+    /// don't bleed into the new session, then spawns a new runtime
+    /// with a new sessionId.
+    func startNewSession() {
+        // Drain the old session first — keeps its tail safe.
+        let willFlush: Bool = queue.sync {
+            guard let rt = runtime else { return false }
+            pushLocked(rt: rt, type: "session_end", data: SessionEndEventData(reason: "manual_new"))
+            return true
+        }
+        if willFlush {
+            Task.detached(priority: .utility) { [weak self] in
+                await self?.flushNow()
+            }
+        }
+        // Spin up a fresh runtime + session_start on the queue.
+        queue.sync {
+            startNewSessionLocked()
+        }
+    }
+
+    /// Stop recording AND block until the in-memory buffer has been
+    /// uploaded (or persisted to disk for retry). Used by customers
+    /// who want to guarantee data delivery during app shutdown —
+    /// `applicationWillTerminate` or a sign-out flow.
+    ///
+    /// Caps wait at `timeoutSeconds` (default 5s) so the SDK can't
+    /// hang the host app. Returns early on success; logs + returns
+    /// on timeout. Always tears down regardless of upload outcome
+    /// — the disk-queue picks up unsent batches on next start().
+    func stopApplicationAndUploadData(timeoutSeconds: TimeInterval = 5) {
+        let willFlush: Bool = queue.sync {
+            guard let rt = runtime else { return false }
+            pushLocked(rt: rt, type: "session_end", data: SessionEndEventData(reason: "app_terminating"))
+            return true
+        }
+        let sem = DispatchSemaphore(value: 0)
+        if willFlush {
+            Task.detached(priority: .utility) { [weak self] in
+                await self?.flushNow()
+                sem.signal()
+            }
+            // Block — caller WANTS to wait. Cap at timeoutSeconds so
+            // a wedged network doesn't hang app termination.
+            _ = sem.wait(timeout: .now() + timeoutSeconds)
+        }
+        // Tear down the rest of the SDK as if stop() had been called.
+        stop()
+    }
+
     func track(name: String, properties: [String: Any]?) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }

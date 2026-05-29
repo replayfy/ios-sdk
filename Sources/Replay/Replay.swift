@@ -185,6 +185,79 @@ public enum Replay {
         ReplayCore.shared.setSessionProperty(key, value: value)
     }
 
+    // -----------------------------------------------------------------
+    //  UXCam-parity session-control surface
+    // -----------------------------------------------------------------
+
+    /// Toggle the UIViewController.viewDidAppear auto-tagger on/off
+    /// at runtime. Default-on (via `ReplayConfig.autoScreenName`);
+    /// flip false to drive routes manually via ``tagScreenName(_:)``
+    /// for a flow where VC class names don't map cleanly to
+    /// user-meaningful screens.
+    ///
+    /// Mirrors UXCam's `setAutomaticScreenNameTagging(_:)`.
+    public static func setAutomaticScreenNameTagging(_ enabled: Bool) {
+        ReplayCore.shared.setAutomaticScreenNameTagging(enabled)
+    }
+
+    /// Attach the device's push-notification token to the session.
+    /// Defaults `platform` to "apns"; pass "fcm" if you're piping
+    /// a Firebase token. Dashboard wiring (chip on player header)
+    /// tracked separately.
+    ///
+    /// Mirrors UXCam's `setPushNotificationToken(_:)`.
+    public static func setPushNotificationToken(
+        _ token: String,
+        platform: String = "apns"
+    ) {
+        ReplayCore.shared.setPushNotificationToken(token, platform: platform)
+    }
+
+    /// Flag the current session as a favorite so it surfaces in the
+    /// "starred sessions" filter on the dashboard. One-shot — call
+    /// once per session you want flagged.
+    ///
+    /// Mirrors UXCam's `markSessionAsFavorite()`.
+    public static func markSessionAsFavorite() {
+        ReplayCore.shared.markSessionAsFavorite()
+    }
+
+    /// Attach a SESSION-level tag (with optional properties) for
+    /// filtering the session list. Distinct from ``track(_:properties:)``
+    /// which is event-level. Use for "this session is in A/B variant
+    /// X" or "this session belongs to the holiday checkout flow".
+    ///
+    /// Mirrors UXCam's `addTagWithProperties(_:properties:)`.
+    public static func addTagWithProperties(
+        _ name: String,
+        properties: [String: Any]? = nil
+    ) {
+        ReplayCore.shared.addTagWithProperties(name, properties: properties)
+    }
+
+    /// Force-end the current session + spin up a fresh one. Useful
+    /// for logical session boundaries inside one app process —
+    /// user logout-then-login, A/B re-bucketing, "start over"
+    /// flows. Drains the old session's events first so they don't
+    /// bleed into the new one.
+    ///
+    /// Mirrors UXCam's `startNewSession()`.
+    public static func startNewSession() {
+        ReplayCore.shared.startNewSession()
+    }
+
+    /// Stop recording AND block (up to `timeoutSeconds`) until the
+    /// in-memory buffer has been uploaded or persisted to disk.
+    /// Call this from `applicationWillTerminate` or a sign-out
+    /// flow when you want strong-delivery semantics. Caps the wait
+    /// so a wedged network can't hang the host app.
+    ///
+    /// Mirrors UXCam's `stopApplicationAndUploadData()`. Default
+    /// timeout 5s.
+    public static func stopApplicationAndUploadData(timeoutSeconds: TimeInterval = 5) {
+        ReplayCore.shared.stopApplicationAndUploadData(timeoutSeconds: timeoutSeconds)
+    }
+
     /// Bridge customer-side logging into the SDK's console-event
     /// stream. `print()` / `NSLog()` are captured automatically when
     /// `captureConsole = true`. Use this entry point for loggers
