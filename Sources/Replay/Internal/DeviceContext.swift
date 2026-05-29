@@ -35,8 +35,23 @@ enum DeviceContext {
         let bundleId = Bundle.main.bundleIdentifier ?? "?"
         #if canImport(UIKit)
         let device = UIDevice.current
+        // Form-factor token FIRST so the dashboard's parseUA
+        // regex `/iPhone|iPad|iPod/i` matches and the session
+        // surfaces as the correct OS. Without this, the model
+        // identifier on simulator is `arm64` / `x86_64` and the
+        // dashboard renders "Other on Other".
+        let formFactor: String
+        switch device.userInterfaceIdiom {
+        case .phone:    formFactor = "iPhone"
+        case .pad:      formFactor = "iPad"
+        case .tv:       formFactor = "AppleTV"
+        case .mac:      formFactor = "Mac"
+        case .vision:   formFactor = "AppleVision"
+        case .carPlay:  formFactor = "CarPlay"
+        @unknown default: formFactor = "iOS device"
+        }
         return "\(BuildInfo.sdkName)/\(BuildInfo.sdkVersion) " +
-            "(\(bundleId)/\(appVersion); \(deviceModelIdentifier()); " +
+            "(\(formFactor); \(bundleId)/\(appVersion); \(deviceModelIdentifier()); " +
             "\(device.systemName) \(device.systemVersion))"
         #else
         // macOS / Linux build (tests) — fall back to a minimal UA.
