@@ -68,10 +68,15 @@ enum BitmapCapture {
         //     list and painted together.
         let privacyRects: [CGRect] = {
             if PrivacyRegistry.shared.occludeAllScreen {
+                // Drain pending bridge rects even on full-screen path
+                // so they don't carry into the NEXT (non-full-screen)
+                // snapshot. Result discarded.
+                _ = PrivacyRegistry.shared.consumePendingFrameRects()
                 return [view.bounds]
             }
             return PrivacyRegistry.shared.sensitiveBounds(within: view) +
-                   PrivacyRegistry.shared.bulkBounds(within: view)
+                   PrivacyRegistry.shared.bulkBounds(within: view) +
+                   PrivacyRegistry.shared.consumePendingFrameRects()
         }()
 
         // Hardware-surface plans: MTKView / CAMetalLayer /

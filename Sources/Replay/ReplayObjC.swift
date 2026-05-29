@@ -179,6 +179,16 @@ public final class ReplayBridge: NSObject {
     public static func occludeSensitiveScreen(_ occlude: Bool) {
         Replay.occludeSensitiveScreen(occlude)
     }
+
+    /// `[Replay occludeRectsOnNextFrame: @[[NSValue valueWithCGRect:r1], …]]`
+    ///
+    /// ObjC has no native [CGRect] array — RN / Cordova bridges pass
+    /// boxed NSValue. We unwrap via cgRectValue.
+    @objc(occludeRectsOnNextFrame:)
+    public static func occludeRectsOnNextFrame(_ rects: [NSValue]) {
+        let unboxed = rects.map { $0.cgRectValue }
+        Replay.occludeRectsOnNextFrame(unboxed)
+    }
     #endif
 
     /// `[Replay pauseRecording]`

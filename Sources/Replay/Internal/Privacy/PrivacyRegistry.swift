@@ -55,6 +55,40 @@ final class PrivacyRegistry {
     var occludeAllTextViews: Bool = false
     var occludeAllScreen: Bool = false
 
+    // -----------------------------------------------------------------
+    //  Pending one-shot rects (RN / Flutter bridges)
+    // -----------------------------------------------------------------
+    //
+    // Cross-platform bridges (React Native + Flutter) don't have
+    // native UIView refs we can add(). The bridge calculates rects
+    // on the JS / Dart side (RN measureInWindow,
+    // Flutter RenderBox.localToGlobal) and hands raw root-relative
+    // rects here for the NEXT snapshot.
+    //
+    // One-shot semantics: BitmapCapture drains on every snapshot.
+    // Bridges set rects every frame before capture; calling
+    // setPendingFrameRects again without a snapshot in between
+    // REPLACES (does not append to) the prior set.
+
+    private let pendingRectsLock = NSLock()
+    private var pendingFrameRects: [CGRect] = []
+
+    /// Bridge entry point — set the rects to paint on the next
+    /// snapshot. Replaces any prior pending set.
+    func setPendingFrameRects(_ rects: [CGRect]) {
+        pendingRectsLock.withLock { pendingFrameRects = rects }
+    }
+
+    /// Snapshot + clear atomically so we never paint the same rect
+    /// twice. Called by BitmapCapture once per capture.
+    func consumePendingFrameRects() -> [CGRect] {
+        return pendingRectsLock.withLock {
+            let snapshot = pendingFrameRects
+            pendingFrameRects = []
+            return snapshot
+        }
+    }
+
     private init() {}
 
     #if canImport(UIKit)

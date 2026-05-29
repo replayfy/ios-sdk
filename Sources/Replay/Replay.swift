@@ -143,6 +143,24 @@ public enum Replay {
     public static func occludeSensitiveScreen(_ occlude: Bool) {
         PrivacyRegistry.shared.occludeAllScreen = occlude
     }
+
+    /// Paint the diagonal-stripe overlay over a set of `CGRect`
+    /// regions on the NEXT snapshot only. Entry point for
+    /// cross-platform SDK bridges (React Native, Flutter) whose
+    /// components don't have native `UIView` references — the
+    /// bridge calculates rects on the JS / Dart side
+    /// (RN `measureInWindow`, Flutter `RenderBox.localToGlobal`)
+    /// and hands them here in root-relative points.
+    ///
+    /// One-shot: the rects clear once a snapshot fires. Bridges
+    /// call this every frame (or before any capture they want
+    /// occluded). Calling it again without a snapshot in between
+    /// REPLACES (does not append to) the prior set.
+    ///
+    /// Mirrors UXCam's `occludeRectsOnNextFrame(rects)`.
+    public static func occludeRectsOnNextFrame(_ rects: [CGRect]) {
+        PrivacyRegistry.shared.setPendingFrameRects(rects)
+    }
     #endif
 
     /// Pause schematic capture; events keep flowing.
