@@ -44,7 +44,15 @@ enum BitmapCapture {
         // ViewTreeSerializer's pixel bounds for clean overlay).
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = view.window?.screen.scale ?? UIScreen.main.scale
-        format.opaque = view.isOpaque
+        // Force opaque=true + an explicit color renderer. Without this
+        // UIKit's auto-format heuristic picked grayscale when the
+        // initial frame had no vivid pixels, producing 8-bit grayscale
+        // PNGs (~17KB) on first launch. Snapshots MUST be RGB so the
+        // dashboard renders colour reliably across both platforms.
+        format.opaque = true
+        if #available(iOS 12.0, *) {
+            format.preferredRange = .standard  // sRGB-equivalent
+        }
         let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
 
         // Collect privacy-view bounds BEFORE entering the renderer
@@ -52,19 +60,43 @@ enum BitmapCapture {
         // registry call walks the weak table once.
         let privacyRects = PrivacyRegistry.shared.sensitiveBounds(within: view)
 
+        // Hardware-surface plans: MTKView / CAMetalLayer /
+        // AVPlayerLayer / CAEAGLLayer / GLKView. Their content is
+        // composited outside view.drawHierarchy's reach, so we
+        // overlay each one via CALayer.render(in:) after the main
+        // paint pass. iOS analog of Android's per-SurfaceView
+        // PixelCopy composite.
+        let hardwarePlans = HardwareLayerCapture.collect(in: view)
+
         return renderer.image { ctx in
             if scale != 1 {
                 ctx.cgContext.scaleBy(x: scale, y: scale)
             }
-            // afterScreenUpdates: false — capture the current frame.
-            // Setting it to true triggers a layout + render pass on
-            // every call which causes frame drops on the UI.
-            view.drawHierarchy(in: bounds, afterScreenUpdates: false)
+            // afterScreenUpdates: true — forces a layout + render
+            // pass before snapshot. Costs ~1 frame of UI latency but:
+            //   1. Captures Metal/CAMetalLayer/AVPlayer content that
+            //      the false path silently misses.
+            //   2. Avoids the "empty grayscale capture" failure mode
+            //      where snapshots fire before the first paint
+            //      completes (observed on first-launch capture
+            //      yielding a 17KB grayscale blob).
+            // Snapshots are sparse (1 per screen change + idle) so
+            // the perf cost is negligible vs the correctness win.
+            view.drawHierarchy(in: bounds, afterScreenUpdates: true)
 
-            // Paint a noise-pattern overlay over each privacy view's
-            // bounds. Drawn AFTER drawHierarchy so it sits on top of
-            // the captured pixels, AND only present in the saved
-            // bitmap — never visible on the user's screen.
+            // Composite hardware surfaces ON TOP of the view-paint
+            // result. layer.render(in:) walks layer-private callbacks
+            // (different code path from drawHierarchy) so Metal +
+            // Video content lands here.
+            if !hardwarePlans.isEmpty {
+                HardwareLayerCapture.composite(plans: hardwarePlans, into: ctx.cgContext)
+            }
+
+            // Paint a diagonal-stripe overlay over each privacy
+            // view's bounds. Drawn LAST so it sits on top of the
+            // captured pixels AND any hardware-surface composite —
+            // sensitive Metal content (e.g. game state with a
+            // username overlay) gets occluded properly.
             if !privacyRects.isEmpty {
                 paintPrivacyOverlay(rects: privacyRects, in: ctx.cgContext)
             }

@@ -73,13 +73,20 @@ final class SnapshotCapture {
 
     /// Snapshot the current screen NOW. Caller specifies the trigger
     /// for the player's render heuristic.
+    ///
+    /// ALWAYS deferred to the next main runloop tick — even when
+    /// already on main. Why: customers call `Replay.tagScreenName`
+    /// from `viewDidLoad` / `init`, before the view tree has been
+    /// added to the screen + the first layout pass has flushed.
+    /// Running drawHierarchy synchronously at that moment captures
+    /// a black/empty frame (the view exists logically but its layer
+    /// hasn't been composited yet). A `DispatchQueue.main.async`
+    /// hop yields back to the runloop, lets pending layout +
+    /// CADisplayLink flushes complete, then the capture sees the
+    /// rendered hierarchy.
     func captureNow(trigger: String) {
-        if Thread.isMainThread {
-            doCapture(trigger: trigger)
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.doCapture(trigger: trigger)
-            }
+        DispatchQueue.main.async { [weak self] in
+            self?.doCapture(trigger: trigger)
         }
     }
 
