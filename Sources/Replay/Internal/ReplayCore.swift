@@ -257,6 +257,74 @@ final class ReplayCore {
         }
     }
 
+    // MARK: - setUserProperty / setSessionProperty (UXCam-parity)
+    //
+    // User props ride on EndUser.customProps via the IdentifyPayload
+    // that's re-shipped with every batch — we keep a local
+    // accumulated map + re-set sender.identity on every call.
+    // Session props ship as custom events with kind="session_property"
+    // — dashboard rendering as filterable Session columns is a
+    // separate follow-up (see docs/sdk-capture-matrix.md).
+    //
+    // Mirrors UXCam's setUserProperty / setSessionProperty per-
+    // primitive overloads; Swift's Any subsumes them.
+
+    private var userProps: [String: Any] = [:]
+    // Same userPropsLock pattern as the existing queue — we don't
+    // need a separate lock because every mutation routes through
+    // queue.async.
+
+    func setUserProperty(_ key: String, value: Any?) {
+        let trimmed = key.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let safeKey = String(trimmed.prefix(80))
+        queue.async {
+            // Nullify == remove (matches UXCam's contract for empty-
+            // string values + the SDK norm of nil-as-delete).
+            if let v = value {
+                self.userProps[safeKey] = v
+            } else {
+                self.userProps.removeValue(forKey: safeKey)
+            }
+            // Re-attach to identity so the next batch carries the
+            // updated set.
+            guard let sender = self.sender, let id = sender.identity else {
+                // No identify() yet — props sit in userProps and
+                // ship on the first identify call.
+                return
+            }
+            sender.identity = IdentifyPayload(
+                distinctId: id.distinctId,
+                email: id.email,
+                name: id.name,
+                plan: id.plan,
+                customProps: self.safeProps(self.userProps)
+            )
+        }
+    }
+
+    func setSessionProperty(_ key: String, value: Any?) {
+        let trimmed = key.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let safeKey = String(trimmed.prefix(80))
+        // Ship as a custom event with kind="session_property" so the
+        // dashboard timeline preserves the order + values the
+        // customer set. Pre-runtime calls buffer via pendingTracks
+        // — same path as track().
+        let data = CustomEventData(
+            kind: "session_property",
+            name: safeKey,
+            properties: safeProps([safeKey: value as Any])
+        )
+        queue.async {
+            if let rt = self.runtime {
+                self.pushLocked(rt: rt, type: "custom", data: data)
+            } else {
+                self.pendingTracks.append(data)
+            }
+        }
+    }
+
     func track(name: String, properties: [String: Any]?) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }

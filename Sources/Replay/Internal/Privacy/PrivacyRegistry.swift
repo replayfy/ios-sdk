@@ -33,6 +33,28 @@ final class PrivacyRegistry {
     private let lock = NSLock()
     #endif
 
+    // -----------------------------------------------------------------
+    //  Bulk-privacy flags (UXCam parity)
+    // -----------------------------------------------------------------
+    //
+    // UXCam ships three opt-in switches that occlude broad classes of
+    // views without per-view registration:
+    //
+    //   occludeAllTextFields  → every UITextField / UITextView is
+    //                           treated as sensitive (input controls)
+    //   occludeAllTextViews   → every UILabel is treated as sensitive
+    //                           (anything that DISPLAYS read-only text)
+    //   occludeAllScreen      → whole captured snapshot is painted over
+    //                           with the diagonal-stripe overlay
+    //
+    // Flags are checked in isSensitive() + BitmapCapture's overlay
+    // pass; setting them mid-session takes effect on the NEXT snapshot.
+    // `@objc` so the bridge class in ReplayObjC can flip them too.
+
+    var occludeAllTextFields: Bool = false
+    var occludeAllTextViews: Bool = false
+    var occludeAllScreen: Bool = false
+
     private init() {}
 
     #if canImport(UIKit)
@@ -53,6 +75,21 @@ final class PrivacyRegistry {
     /// marks a container (e.g. a UIStackView for the payment-method
     /// row) and expects every descendant to inherit the mark.
     func isSensitive(_ view: UIView) -> Bool {
+        // Whole-screen overlay → every view is sensitive. Cheap
+        // short-circuit before the per-view checks.
+        if occludeAllScreen { return true }
+        // Bulk class-based occlusion. UITextField + UITextView are
+        // input controls; UILabel is read-only display text. The
+        // wantText* flags target each set independently to match
+        // UXCam's API surface (customers can hide JUST the inputs
+        // without redacting labels + buttons).
+        if occludeAllTextFields,
+           view is UITextField || view is UITextView {
+            return true
+        }
+        if occludeAllTextViews, view is UILabel {
+            return true
+        }
         return lock.withLock {
             if table.contains(view) { return true }
             var current: UIView? = view.superview
@@ -61,6 +98,45 @@ final class PrivacyRegistry {
                 current = v.superview
             }
             return false
+        }
+    }
+
+    /// Walk [root]'s view tree and return frames (in root coords) of
+    /// every UIView whose class matches a currently-enabled bulk-
+    /// privacy flag. Used by BitmapCapture to paint stripe overlays
+    /// over the matching regions in the captured PNG.
+    ///
+    /// Empty when neither bulk flag is set → zero overhead for
+    /// customers not using bulk privacy.
+    func bulkBounds(within root: UIView) -> [CGRect] {
+        let wantFields = occludeAllTextFields
+        let wantLabels = occludeAllTextViews
+        guard wantFields || wantLabels else { return [] }
+        var out: [CGRect] = []
+        walkBulk(root, root: root, wantFields: wantFields, wantLabels: wantLabels, out: &out)
+        return out
+    }
+
+    private func walkBulk(
+        _ view: UIView,
+        root: UIView,
+        wantFields: Bool,
+        wantLabels: Bool,
+        out: inout [CGRect]
+    ) {
+        guard !view.isHidden, view.alpha > 0.01,
+              view.bounds.width > 0, view.bounds.height > 0
+        else { return }
+        let matches = (wantFields && (view is UITextField || view is UITextView)) ||
+                      (wantLabels && view is UILabel)
+        if matches {
+            out.append(view.convert(view.bounds, to: root))
+            // Don't recurse — text widgets don't contain other
+            // text widgets meaningfully.
+            return
+        }
+        for sub in view.subviews {
+            walkBulk(sub, root: root, wantFields: wantFields, wantLabels: wantLabels, out: &out)
         }
     }
 

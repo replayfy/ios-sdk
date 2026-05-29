@@ -58,7 +58,21 @@ enum BitmapCapture {
         // Collect privacy-view bounds BEFORE entering the renderer
         // block — keeps the block focused on draw operations. The
         // registry call walks the weak table once.
-        let privacyRects = PrivacyRegistry.shared.sensitiveBounds(within: view)
+        //
+        // UXCam-parity bulk-privacy semantics:
+        //   - occludeAllScreen overrides everything: a single full-
+        //     bounds rect → the whole snapshot gets the stripe
+        //     overlay so no customer pixels survive.
+        //   - Otherwise: per-view marks + bulk class-based matches
+        //     (UITextField / UITextView / UILabel) merged into one
+        //     list and painted together.
+        let privacyRects: [CGRect] = {
+            if PrivacyRegistry.shared.occludeAllScreen {
+                return [view.bounds]
+            }
+            return PrivacyRegistry.shared.sensitiveBounds(within: view) +
+                   PrivacyRegistry.shared.bulkBounds(within: view)
+        }()
 
         // Hardware-surface plans: MTKView / CAMetalLayer /
         // AVPlayerLayer / CAEAGLLayer / GLKView. Their content is

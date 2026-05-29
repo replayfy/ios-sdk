@@ -113,6 +113,36 @@ public enum Replay {
     public static func removePrivacyView(_ view: UIView) {
         PrivacyRegistry.shared.remove(view)
     }
+
+    /// Occlude every `UITextField` and `UITextView` in the host app
+    /// regardless of whether it's been explicitly registered via
+    /// ``addPrivacyView(_:)``. Useful default-on PII protection when
+    /// the app routinely handles sensitive input.
+    ///
+    /// Mirrors UXCam's `occludeAllTextFields(_:)`.
+    public static func occludeAllTextFields(_ occlude: Bool) {
+        PrivacyRegistry.shared.occludeAllTextFields = occlude
+    }
+
+    /// Occlude every `UILabel` — anything that DISPLAYS read-only
+    /// text. Pair with ``occludeAllTextFields(_:)`` to redact 100%
+    /// of textual content in the captured snapshot.
+    ///
+    /// Mirrors UXCam's `occludeAllTextView(_:)`.
+    public static func occludeAllTextView(_ occlude: Bool = true) {
+        PrivacyRegistry.shared.occludeAllTextViews = occlude
+    }
+
+    /// Paint the ENTIRE captured snapshot with the diagonal-stripe
+    /// occlusion overlay. Nuclear option for screens where the
+    /// customer doesn't want ANY pixel data to leave the device
+    /// (health records, banking pin pad, etc.). Set false to
+    /// restore normal capture.
+    ///
+    /// Mirrors UXCam's `occludeSensitiveScreen(_:)`.
+    public static func occludeSensitiveScreen(_ occlude: Bool) {
+        PrivacyRegistry.shared.occludeAllScreen = occlude
+    }
     #endif
 
     /// Pause schematic capture; events keep flowing.
@@ -128,6 +158,31 @@ public enum Replay {
     /// Discard the current session entirely — no upload.
     public static func cancelSession() {
         ReplayCore.shared.stub("cancelSession")
+    }
+
+    /// Attach a sticky property to the END USER (persists across
+    /// sessions, attached to the EndUser row server-side). Distinct
+    /// from `track` event properties which only attach to a single
+    /// event.
+    ///
+    /// Mirrors UXCam's `setUserProperty(_:, _:)` per-primitive
+    /// overloads — Swift's `Any?` subsumes them.
+    ///
+    /// Common use: `Replay.setUserProperty("plan", value: "pro")`
+    /// or `Replay.setUserProperty("signupSource", value: "google_ads")`.
+    public static func setUserProperty(_ key: String, value: Any?) {
+        ReplayCore.shared.setUserProperty(key, value: value)
+    }
+
+    /// Attach a sticky property to the CURRENT SESSION. Visible on
+    /// the dashboard as a Session-level field (chip on the player
+    /// header — dashboard wiring is a separate task).
+    ///
+    /// Use for ephemeral per-session context:
+    /// `Replay.setSessionProperty("ab_variant", value: "B")`,
+    /// `Replay.setSessionProperty("checkout_step", value: "shipping")`.
+    public static func setSessionProperty(_ key: String, value: Any?) {
+        ReplayCore.shared.setSessionProperty(key, value: value)
     }
 
     /// Bridge customer-side logging into the SDK's console-event

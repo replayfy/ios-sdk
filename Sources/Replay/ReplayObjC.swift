@@ -161,6 +161,24 @@ public final class ReplayBridge: NSObject {
     public static func removePrivacyView(_ view: UIView) {
         Replay.removePrivacyView(view)
     }
+
+    /// `[Replay occludeAllTextFields: YES]`
+    @objc(occludeAllTextFields:)
+    public static func occludeAllTextFields(_ occlude: Bool) {
+        Replay.occludeAllTextFields(occlude)
+    }
+
+    /// `[Replay occludeAllTextView: YES]`
+    @objc(occludeAllTextView:)
+    public static func occludeAllTextView(_ occlude: Bool) {
+        Replay.occludeAllTextView(occlude)
+    }
+
+    /// `[Replay occludeSensitiveScreen: YES]`
+    @objc(occludeSensitiveScreen:)
+    public static func occludeSensitiveScreen(_ occlude: Bool) {
+        Replay.occludeSensitiveScreen(occlude)
+    }
     #endif
 
     /// `[Replay pauseRecording]`
@@ -186,5 +204,17 @@ public final class ReplayBridge: NSObject {
         stack: String?
     ) {
         Replay.log(level: level, message: message, stack: stack)
+    }
+
+    /// `[Replay setUserProperty:@"plan" value:@"pro"]`
+    @objc(setUserProperty:value:)
+    public static func setUserProperty(_ key: String, value: Any?) {
+        Replay.setUserProperty(key, value: value)
+    }
+
+    /// `[Replay setSessionProperty:@"ab_variant" value:@"B"]`
+    @objc(setSessionProperty:value:)
+    public static func setSessionProperty(_ key: String, value: Any?) {
+        Replay.setSessionProperty(key, value: value)
     }
 }
