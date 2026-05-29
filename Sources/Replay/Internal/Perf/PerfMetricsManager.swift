@@ -29,6 +29,7 @@ final class PerfMetricsManager {
     private let frames: FrameRateMonitor
     private let memory: MemoryPoller
     private let thermal: ThermalMonitor
+    private let hang: HangWatchdog
 
     init(onMetric: @escaping (PerformanceEventData) -> Void) {
         self.onMetric = onMetric
@@ -52,6 +53,23 @@ final class PerfMetricsManager {
                 kind: "perf", metric: metric, value: value, unit: unit, rating: rating
             ))
         }
+        self.hang = HangWatchdog { frozenMs in
+            // Severity buckets match the Android SDK so the
+            // dashboard can render both platforms with the same
+            // colour-coded thresholds:
+            //   ≥ 10 s → poor      (severe freeze, user likely
+            //                       force-quit)
+            //   5–10 s → needs-improvement (noticeable but
+            //                              recoverable)
+            let rating = frozenMs >= 10_000 ? "poor" : "needs-improvement"
+            onMetric(PerformanceEventData(
+                kind: "perf",
+                metric: "anr_ms",
+                value: Double(frozenMs),
+                unit: "ms",
+                rating: rating
+            ))
+        }
     }
 
     /// Start every collector. Called from ``ReplayCore/start``
@@ -60,6 +78,7 @@ final class PerfMetricsManager {
         frames.start()
         memory.start()
         thermal.start()
+        hang.start()
         // Cold start fires once on first foreground; ReplayCore
         // calls reportFirstForeground from its lifecycle hook so
         // we measure cold-launch → user-sees-app time, not just
@@ -71,6 +90,7 @@ final class PerfMetricsManager {
         frames.stop()
         memory.stop()
         thermal.stop()
+        hang.stop()
     }
 
     /// Emit the cold-start metric exactly once per process. Idempotent
