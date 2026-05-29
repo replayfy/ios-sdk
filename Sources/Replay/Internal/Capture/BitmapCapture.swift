@@ -87,7 +87,7 @@ enum BitmapCapture {
         // PixelCopy composite.
         let hardwarePlans = HardwareLayerCapture.collect(in: view)
 
-        return renderer.image { ctx in
+        let image = renderer.image { ctx in
             if scale != 1 {
                 ctx.cgContext.scaleBy(x: scale, y: scale)
             }
@@ -120,6 +120,15 @@ enum BitmapCapture {
                 paintPrivacyOverlay(rects: privacyRects, in: ctx.cgContext)
             }
         }
+        // Kick off async WKWebView snapshot refreshes for use in
+        // the NEXT capture cycle. takeSnapshot(with:) is fire-and-
+        // forget here — completion lands on main and updates the
+        // cache by the time the next snapshot fires (1s+ later on
+        // idle, immediately on screen-change).
+        #if canImport(WebKit)
+        HardwareLayerCapture.refreshWebViews(plans: hardwarePlans)
+        #endif
+        return image
     }
 
     /// Diagonal-stripe pattern over privacy regions. Cheaper than a

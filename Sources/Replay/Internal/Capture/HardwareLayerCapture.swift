@@ -2,6 +2,9 @@ import Foundation
 #if canImport(UIKit)
 import UIKit
 import QuartzCore
+#if canImport(WebKit)
+import WebKit
+#endif
 
 /// iOS counterpart of Android's per-SurfaceView PixelCopy composite.
 ///
@@ -16,9 +19,12 @@ import QuartzCore
 ///   • `AVPlayerLayer` — video playback layers (AVKit, AVPlayer-based
 ///     UIs).
 ///   • `GLKView` — legacy OpenGL ES (deprecated but still common).
-///   • `WKWebView` — web content (handled separately via
-///     `WKWebView.takeSnapshot(with:)` which is async; out of scope
-///     for this commit).
+///   • `WKWebView` — web content. Special-cased: a separate
+///     ``WebViewSnapshotCache`` keeps the latest async
+///     `takeSnapshot(with:)` result per WebView. The composite
+///     step paints the cached UIImage instead of calling
+///     `layer.render(in:)` (which silently produces blanks for
+///     WebContent's IOSurface).
 ///
 /// Strategy:
 ///   1. Walk the view hierarchy on the main thread (caller already
@@ -88,6 +94,13 @@ enum HardwareLayerCapture {
     /// AVKit (keeps the SDK's binary surface small + transitive
     /// dependency-free).
     private static func isHardwareSurface(_ view: UIView) -> Bool {
+        #if canImport(WebKit)
+        // WKWebView is a hardware-surface in our sense: its
+        // content lives in a separate process and drawHierarchy
+        // doesn't capture it reliably. composite() routes it to
+        // the WebViewSnapshotCache path rather than layer.render(in:).
+        if view is WKWebView { return true }
+        #endif
         let className = String(describing: type(of: view))
         if className == "MTKView" || className == "GLKView" { return true }
         // Layer-based detection — covers custom UIView subclasses
@@ -112,6 +125,38 @@ enum HardwareLayerCapture {
             ctx.saveGState()
             ctx.translateBy(x: plan.frameInRoot.origin.x,
                             y: plan.frameInRoot.origin.y)
+            #if canImport(WebKit)
+            if let webView = plan.view as? WKWebView {
+                // WKWebView path: use the cached snapshot from the
+                // PRIOR async takeSnapshot(with:). One-frame-behind
+                // staleness vs the rest of the capture — acceptable
+                // since pages don't change between consecutive
+                // snapshots (1s+ apart) often enough to matter, and
+                // capture is correctness-critical here vs
+                // layer.render's blanks.
+                if let cached = WebViewSnapshotCache.shared.cachedImage(for: webView),
+                   let cg = cached.cgImage {
+                    // UIImage's coordinate system is flipped vs
+                    // CGContext's so we have to invert Y when
+                    // drawing via cgImage. UIGraphicsImageRenderer's
+                    // context already accounts for this when
+                    // `UIImage.draw(at:)` is used, but we have the
+                    // raw CGContext here.
+                    let rect = CGRect(origin: .zero, size: plan.frameInRoot.size)
+                    ctx.saveGState()
+                    ctx.translateBy(x: 0, y: rect.height)
+                    ctx.scaleBy(x: 1, y: -1)
+                    ctx.draw(cg, in: rect)
+                    ctx.restoreGState()
+                }
+                // If no cached image yet (first time this WebView
+                // appears) the region stays as drawHierarchy left
+                // it — blank or partial. Next snapshot picks it up
+                // once SnapshotCapture's refresh pass fires.
+                ctx.restoreGState()
+                continue
+            }
+            #endif
             // `render(in:)` walks the layer's own draw callbacks —
             // different from `view.drawHierarchy` which calls
             // -drawRect: on each view. For CAMetalLayer / AVPlayerLayer
@@ -121,5 +166,18 @@ enum HardwareLayerCapture {
             ctx.restoreGState()
         }
     }
+
+    #if canImport(WebKit)
+    /// Kick off async snapshots for every WebView in [plans]. Called
+    /// AFTER the main capture lands so the refreshed image is ready
+    /// for the next snapshot cycle.
+    static func refreshWebViews(plans: [LayerPlan]) {
+        for plan in plans {
+            if let webView = plan.view as? WKWebView {
+                WebViewSnapshotCache.shared.refresh(webView)
+            }
+        }
+    }
+    #endif
 }
 #endif
