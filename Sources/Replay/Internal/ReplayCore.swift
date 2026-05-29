@@ -305,30 +305,42 @@ final class ReplayCore {
             message: "\(record.detail)",
             stack: nil
         )
-        queue.sync {
-            guard let rt = runtime else { return }
-            pushLocked(rt: rt, type: "error", data: data)
+        // `async` for the same reason as emitPerformance: this is
+        // called inline from CrashHandler.install (during start) which
+        // may already be on the core queue. Avoid the re-entrant
+        // dispatch-deadlock.
+        queue.async {
+            guard let rt = self.runtime else { return }
+            self.pushLocked(rt: rt, type: "error", data: data)
         }
     }
 
     private func emitNetwork(_ event: NetworkEventData) {
-        queue.sync {
-            guard let rt = runtime else { return }
-            pushLocked(rt: rt, type: "network", data: event)
+        queue.async {
+            guard let rt = self.runtime else { return }
+            self.pushLocked(rt: rt, type: "network", data: event)
         }
     }
 
+    /// Use `async` not `sync` here because perf collectors may emit
+    /// during `Replay.start` itself (e.g. `ThermalMonitor.start()`
+    /// immediately emits the current state) — that path holds the
+    /// `queue.sync` lock already, so a nested `queue.sync` would
+    /// dispatch-deadlock (libdispatch traps with "Abort Cause"
+    /// 27021769562915074). Async re-entry just enqueues and runs
+    /// after the current sync block completes; serial queue
+    /// preserves ordering.
     private func emitPerformance(_ perf: PerformanceEventData) {
-        queue.sync {
-            guard let rt = runtime else { return }
-            pushLocked(rt: rt, type: "performance", data: perf)
+        queue.async {
+            guard let rt = self.runtime else { return }
+            self.pushLocked(rt: rt, type: "performance", data: perf)
         }
     }
 
     private func emitSnapshot(_ snap: NativeSnapshotEventData) {
-        queue.sync {
-            guard let rt = runtime else { return }
-            pushLocked(rt: rt, type: "native_snapshot", data: snap)
+        queue.async {
+            guard let rt = self.runtime else { return }
+            self.pushLocked(rt: rt, type: "native_snapshot", data: snap)
         }
     }
 

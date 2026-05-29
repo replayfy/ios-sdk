@@ -1,0 +1,63 @@
+# XcodeGen spec for the iOS example app used for end-to-end smoke
+# testing of the Replay SDK on the iOS Simulator.
+#
+# Mirrors what replay-android-sdk/example-app does — a tiny single-VC
+# app exercising every SDK surface: taps, snapshots (incl. metal /
+# hardware surface for hole-punch parity), occlusion, ANR/hang
+# detection, network capture.
+#
+# Regenerate after editing: `cd Examples/ExampleApp && xcodegen`
+
+name: ReplayExample
+options:
+  bundleIdPrefix: io.replayfy.example
+  deploymentTarget:
+    iOS: "15.0"
+  developmentLanguage: en
+  xcodeVersion: "26.5"
+  createIntermediateGroups: true
+
+packages:
+  # Depend on the local Replay SwiftPM package one level up. Using a
+  # local path means every build picks up SDK source changes
+  # immediately — no caching layer between the example app and the
+  # SDK under test.
+  Replay:
+    path: ../..
+
+targets:
+  ReplayExample:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Sources
+    dependencies:
+      - package: Replay
+        product: Replay
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Replay Example
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities: [arm64]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Cleartext to 10.0.2.2 (Android emulator alias) isn't needed
+        # on iOS — the simulator hits the host directly. But our
+        # local ingest is HTTP on :4000 so we need a global cleartext
+        # opt-in for the dev build. Production apps must keep this
+        # OFF and use HTTPS.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"  # iPhone only — speeds simulator boot
+        PRODUCT_BUNDLE_IDENTIFIER: io.replayfy.example
+        IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        SWIFT_VERSION: "5.9"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # No code signing for simulator-only smoke builds.
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
