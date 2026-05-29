@@ -260,6 +260,12 @@ struct PerformanceEventData: Encodable {
     let value: Double
     let unit: String // "ms" | "mb" | "pct" | "count" | ""
     let rating: String? // "good" | "needs-improvement" | "poor"
+    /// Optional rich payload for metrics that need more than a
+    /// numeric value. Used today for `hang_ms` — the
+    /// MetricKit-backed HangWatchdog ships the captured stack here
+    /// so the dashboard can group hangs by stack signature.
+    /// Capped to ~8 KB before send.
+    var details: String? = nil
 }
 
 // MARK: - Type-erased Encodable

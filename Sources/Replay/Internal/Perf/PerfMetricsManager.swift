@@ -65,12 +65,21 @@ final class PerfMetricsManager {
             //   5–10 s → needs-improvement (noticeable but
             //                              recoverable)
             let rating = frozenMs >= 10_000 ? "poor" : "needs-improvement"
+            // PerformanceEventData.details is intentionally nil on
+            // iOS: walking the main thread's stack from a background
+            // thread requires mach `thread_suspend` + `thread_get_state`
+            // which is unsafe across iOS versions. The dashboard will
+            // render the hang chip without a stack on iOS sessions; a
+            // future MetricKit MXHangDiagnostic subscriber can fill
+            // this in asynchronously (with the 24 h-delay caveat
+            // documented on HangWatchdog).
             onMetric(PerformanceEventData(
                 kind: "perf",
                 metric: "anr_ms",
                 value: Double(frozenMs),
                 unit: "ms",
-                rating: rating
+                rating: rating,
+                details: nil
             ))
         }
         #if canImport(UIKit)
