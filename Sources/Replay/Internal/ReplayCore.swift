@@ -174,10 +174,12 @@ final class ReplayCore {
             // application(_:didFinishLaunchingWithOptions:) which IS
             // main, this is safe.
             if config.autoScreenName {
+                #if canImport(UIKit)
                 ScreenAutoDetector.onScreenChange = { [weak self] name in
                     self?.setRoute(name)
                 }
                 ScreenAutoDetector.enable()
+                #endif
             }
 
             // Network capture via URLProtocol — auto-installs on
@@ -220,12 +222,33 @@ final class ReplayCore {
                 ReplayLog.warn("identify before start — dropping")
                 return
             }
+            // Hoist well-known property keys to dedicated
+            // IdentifyPayload fields so the backend's upsertEndUser
+            // can promote them to EndUser columns (used by the
+            // dashboard's user list + filters). Everything else
+            // stays in customProps as a JSON blob.
+            //
+            // Matches UXCam's behaviour: setUserIdentity(...) +
+            // setUserProperty("email", "foo@bar") populates the
+            // email column even when the customer passed it via
+            // the generic properties bag.
+            let email = (properties?["email"] as? String)?
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+            let name = (properties?["name"] as? String)?
+                .trimmingCharacters(in: .whitespaces)
+            let plan = (properties?["plan"] as? String)?
+                .trimmingCharacters(in: .whitespaces)
+            let rest = properties?
+                .filter { (k, _) in k != "email" && k != "name" && k != "plan" }
+            let restNonEmpty = (rest?.isEmpty == false) ? rest : nil
+
             sender.identity = IdentifyPayload(
                 distinctId: distinctId,
-                email: nil,
-                name: nil,
-                plan: nil,
-                customProps: safeProps(properties)
+                email: email,
+                name: name,
+                plan: plan,
+                customProps: safeProps(restNonEmpty)
             )
         }
         // Force-flush so the identity attaches as soon as possible.
