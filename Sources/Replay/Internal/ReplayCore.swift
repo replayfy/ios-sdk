@@ -597,6 +597,18 @@ final class ReplayCore {
     /// onAppForegrounded if the user returns in time.
     private var pendingShortBreakWorkItem: DispatchWorkItem?
 
+    /// Toggle capture of advanced gestures — long-press, swipe
+    /// (four directions), pinch — in addition to the always-on
+    /// tap. Mirrors UXCam's
+    /// `enableAdvancedGestureRecognizer(_:)`.
+    func setAdvancedGesturesEnabled(_ enabled: Bool) {
+        #if canImport(UIKit)
+        queue.async { [weak self] in
+            self?.tapTracker?.advancedGesturesEnabled = enabled
+        }
+        #endif
+    }
+
     /// Toggle short-break behaviour. When true, a backgrounding
     /// of ≤ [windowSeconds] does NOT end the session — the same
     /// session resumes when the user returns. Default false.

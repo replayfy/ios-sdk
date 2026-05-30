@@ -21,6 +21,12 @@ import UIKit
 ///
 /// Mirrors the Android SDK's `TapTracker.kt`. We keep the same
 /// shape so cross-platform debugging stays symmetric.
+
+// Associated-object key used to stash the swipe direction label
+// ("swipe_left" / etc.) on each UISwipeGestureRecognizer instance.
+// File-scope so all four swipe instances see the same address.
+private var swipeLabelKey: UInt8 = 0
+
 final class TapTracker: NSObject {
 
     private let emit: (TapEventData) -> Void
@@ -92,6 +98,20 @@ final class TapTracker: NSObject {
         }
     }
 
+    /// Toggle for advanced gesture capture — long-press, swipe
+    /// (with direction), pinch (with scale). Default off. Flipped
+    /// by `Replay.enableAdvancedGestureRecognizer(true)`. When
+    /// enabled, additional recognizers attach to each window
+    /// alongside the always-on tap recognizer.
+    ///
+    /// Idempotent at the window level — attachToWindowIfNeeded
+    /// only attaches once per window, and the advanced recognizers
+    /// only attach when this flag was true at attach-time. Customers
+    /// flipping the flag MID-session affect newly-attached windows
+    /// only (existing windows keep whatever recognizer set they
+    /// had).
+    var advancedGesturesEnabled: Bool = false
+
     private func attachToWindowIfNeeded(_ window: UIWindow) {
         if attached.contains(window) { return }
         let recognizer = UITapAndPanRecognizer(target: self, action: #selector(onTouch(_:)))
@@ -102,18 +122,100 @@ final class TapTracker: NSObject {
         recognizer.delaysTouchesBegan = false
         recognizer.delaysTouchesEnded = false
         window.addGestureRecognizer(recognizer)
+        if advancedGesturesEnabled {
+            attachAdvancedGestures(to: window)
+        }
         attached.add(window)
+    }
+
+    /// Add long-press / four-direction swipe / pinch recognizers.
+    /// All share the same delegate semantics as the tap recognizer
+    /// (recognize-simultaneously + don't-swallow) so the host app's
+    /// own gestures keep firing.
+    private func attachAdvancedGestures(to window: UIWindow) {
+        // Long-press — fires once on .began (held past the system
+        // long-press threshold, ~500ms by default).
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(onLongPress(_:)))
+        longPress.delegate = self
+        longPress.cancelsTouchesInView = false
+        window.addGestureRecognizer(longPress)
+        // One swipe recognizer per direction — UISwipeGestureRecognizer
+        // requires a SINGLE direction per instance. Four instances let
+        // us emit "swipe_left" / "swipe_right" / "swipe_up" /
+        // "swipe_down" with the variant encoding the direction.
+        for (direction, label) in [
+            (UISwipeGestureRecognizer.Direction.left,  "swipe_left"),
+            (UISwipeGestureRecognizer.Direction.right, "swipe_right"),
+            (UISwipeGestureRecognizer.Direction.up,    "swipe_up"),
+            (UISwipeGestureRecognizer.Direction.down,  "swipe_down"),
+        ] {
+            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(onSwipe(_:)))
+            swipe.delegate = self
+            swipe.direction = direction
+            swipe.cancelsTouchesInView = false
+            // Store the variant label on the recognizer via the
+            // associated-object pattern. ObjC bridge avoids
+            // subclassing.
+            objc_setAssociatedObject(swipe, &swipeLabelKey, label, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            window.addGestureRecognizer(swipe)
+        }
+        // Pinch — fires on .ended so we report the FINAL scale
+        // (intermediate scale values stream during the gesture but
+        // shipping them all would flood the timeline; one event per
+        // gesture matches UXCam's semantics).
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
+        pinch.delegate = self
+        pinch.cancelsTouchesInView = false
+        window.addGestureRecognizer(pinch)
     }
 
     @objc private func onTouch(_ recognizer: UIGestureRecognizer) {
         guard recognizer.state == .began else { return }
         guard let view = recognizer.view else { return }
         let location = recognizer.location(in: view)
-        captureTap(at: location, in: view)
+        captureTap(at: location, in: view, gesture: nil, pinchScale: nil)
     }
 
-    /// Hit-test → walk up → classify → emit.
-    private func captureTap(at location: CGPoint, in rootView: UIView) {
+    @objc private func onLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began else { return }
+        guard let view = recognizer.view else { return }
+        let location = recognizer.location(in: view)
+        captureTap(at: location, in: view, gesture: "long_press", pinchScale: nil)
+    }
+
+    @objc private func onSwipe(_ recognizer: UISwipeGestureRecognizer) {
+        // UISwipeGestureRecognizer is discrete; only .ended state
+        // counts (no .began fired). Single event per swipe.
+        guard recognizer.state == .ended else { return }
+        guard let view = recognizer.view else { return }
+        guard let label = objc_getAssociatedObject(recognizer, &swipeLabelKey) as? String else { return }
+        let location = recognizer.location(in: view)
+        captureTap(at: location, in: view, gesture: label, pinchScale: nil)
+    }
+
+    @objc private func onPinch(_ recognizer: UIPinchGestureRecognizer) {
+        // One event per gesture — fire on .ended so the scale
+        // reported is the FINAL ratio (intermediate updates would
+        // flood the timeline).
+        guard recognizer.state == .ended else { return }
+        guard let view = recognizer.view else { return }
+        let location = recognizer.location(in: view)
+        captureTap(
+            at: location,
+            in: view,
+            gesture: "pinch",
+            pinchScale: Double(recognizer.scale),
+        )
+    }
+
+    /// Hit-test → walk up → classify → emit. [gesture] / [pinchScale]
+    /// are populated for advanced gestures; nil for the default tap.
+    private func captureTap(
+        at location: CGPoint,
+        in rootView: UIView,
+        gesture: String?,
+        pinchScale: Double?,
+    ) {
         // Hit-test the root window. May return a deep descendant
         // (label inside a button cell). We walk up until we find
         // the most-specific MEANINGFUL ancestor.
@@ -169,6 +271,8 @@ final class TapTracker: NSObject {
             uiValue: uiValue,
             uiId: uiId,
             isSensitive: isSensitive,
+            gesture: gesture,
+            pinchScale: pinchScale,
         )
         emit(tap)
     }

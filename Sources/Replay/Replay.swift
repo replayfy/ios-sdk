@@ -354,6 +354,42 @@ public enum Replay {
         ReplayCore.shared.startNewSession()
     }
 
+    /// Wire network capture for a custom `URLSessionConfiguration`.
+    /// The auto-installed `URLProtocol` only catches `URLSession.shared`
+    /// + deprecated `NSURLConnection` paths — custom configurations
+    /// constructed via `URLSession(configuration:)` bypass us unless
+    /// the capture protocol sits in `configuration.protocolClasses`.
+    ///
+    /// Call BEFORE handing the configuration to `URLSession.init`
+    /// (URLSession copies the config at construction).
+    ///
+    /// Honours the runtime `captureNetwork` flag — when off, the
+    /// inserted class is inert (canInit returns false), so this is
+    /// safe to wire at app launch regardless.
+    ///
+    ///     let cfg = URLSessionConfiguration.default
+    ///     Replay.captureURLSessionConfiguration(cfg)
+    ///     let session = URLSession(configuration: cfg)
+    public static func captureURLSessionConfiguration(_ configuration: URLSessionConfiguration) {
+        URLSessionCapture.captureCustomConfiguration(configuration)
+    }
+
+    /// Toggle capture of advanced gestures — long-press, four-
+    /// direction swipe, pinch — in addition to the always-on tap.
+    /// When enabled, each gesture emits a TapEventData with
+    /// `gesture` set to "long_press" / "swipe_left" / "swipe_right" /
+    /// "swipe_up" / "swipe_down" / "pinch". Pinch events also
+    /// carry a `pinchScale` (final ratio).
+    ///
+    /// Default off. The extra recognizers attach lazily to newly-
+    /// added windows AFTER the flag flips, so non-users pay zero
+    /// overhead.
+    ///
+    /// Mirrors UXCam's `enableAdvancedGestureRecognizer(_:)`.
+    public static func enableAdvancedGestureRecognizer(_ enabled: Bool) {
+        ReplayCore.shared.setAdvancedGesturesEnabled(enabled)
+    }
+
     /// Allow brief backgrounding (≤ `windowSeconds`, default 30 s)
     /// WITHOUT ending the session. The same session resumes when
     /// the user returns. Default off.

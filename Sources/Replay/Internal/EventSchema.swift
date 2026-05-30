@@ -145,6 +145,15 @@ struct TapEventData: Encodable {
     let uiValue: String
     let uiId: String
     let isSensitive: Bool
+    /// Gesture kind — nil/omitted == legacy "tap". Advanced gestures
+    /// emitted when the customer calls
+    /// `Replay.enableAdvancedGestureRecognizer(true)`. Swipe
+    /// direction encoded INTO the variant so the dashboard can
+    /// filter by `gesture == "swipe_up"` without parsing a
+    /// separate direction field.
+    var gesture: String? = nil
+    /// Final scale for "pinch" gestures (omitted otherwise).
+    var pinchScale: Double? = nil
 }
 
 /// Bounds for a tree node. Same shape as TapBounds — kept separate

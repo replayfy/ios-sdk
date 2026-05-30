@@ -285,6 +285,18 @@ public final class ReplayBridge: NSObject {
         Replay.reportBugEvent(name, description: description, properties: properties)
     }
 
+    /// `[Replay captureURLSessionConfiguration: cfg]`
+    @objc(captureURLSessionConfiguration:)
+    public static func captureURLSessionConfiguration(_ configuration: URLSessionConfiguration) {
+        Replay.captureURLSessionConfiguration(configuration)
+    }
+
+    /// `[Replay enableAdvancedGestureRecognizer: YES]`
+    @objc(enableAdvancedGestureRecognizer:)
+    public static func enableAdvancedGestureRecognizer(_ enabled: Bool) {
+        Replay.enableAdvancedGestureRecognizer(enabled)
+    }
+
     /// `[Replay allowShortBreakForAnotherApp: YES windowSeconds: 30.0]`
     @objc(allowShortBreakForAnotherApp:windowSeconds:)
     public static func allowShortBreakForAnotherApp(

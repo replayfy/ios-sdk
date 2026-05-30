@@ -33,6 +33,12 @@ final class PerfMetricsManager {
     #if canImport(UIKit)
     private let battery: BatteryMonitor
     #endif
+    #if canImport(MetricKit) && canImport(UIKit)
+    /// MetricKit subscriber. iOS 14+; stored as Any so the
+    /// availability check stays on the call sites. nil on older
+    /// platforms.
+    private var metricKitHang: Any?
+    #endif
 
     init(onMetric: @escaping (PerformanceEventData) -> Void) {
         self.onMetric = onMetric
@@ -101,6 +107,31 @@ final class PerfMetricsManager {
         #if canImport(UIKit)
         battery.start()
         #endif
+        #if canImport(MetricKit) && canImport(UIKit)
+        if #available(iOS 14.0, *) {
+            // MetricKit MXHangDiagnostic subscriber — delivers the
+            // captured main-thread stack 24h-late but with full
+            // symbolicated frames. We emit a SECONDARY perf event
+            // with `metric=anr_ms_metrickit` so the dashboard can
+            // correlate by timestamp with the live `anr_ms`
+            // (timestamp-matched within ±5 min).
+            let sub = MetricKitHangSubscriber()
+            sub.emit = { [weak self] durationMs, stack in
+                guard let self = self else { return }
+                let rating = durationMs >= 10_000 ? "poor" : "needs-improvement"
+                self.onMetric(PerformanceEventData(
+                    kind: "perf",
+                    metric: "anr_ms_metrickit",
+                    value: Double(durationMs),
+                    unit: "ms",
+                    rating: rating,
+                    details: stack
+                ))
+            }
+            sub.install()
+            self.metricKitHang = sub
+        }
+        #endif
         // Cold start fires once on first foreground; ReplayCore
         // calls reportFirstForeground from its lifecycle hook so
         // we measure cold-launch → user-sees-app time, not just
@@ -115,6 +146,12 @@ final class PerfMetricsManager {
         hang.stop()
         #if canImport(UIKit)
         battery.stop()
+        #endif
+        #if canImport(MetricKit) && canImport(UIKit)
+        if #available(iOS 14.0, *) {
+            (metricKitHang as? MetricKitHangSubscriber)?.uninstall()
+            metricKitHang = nil
+        }
         #endif
     }
 

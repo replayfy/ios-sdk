@@ -73,6 +73,35 @@ final class URLSessionCapture: URLProtocol {
         URLProtocol.unregisterClass(URLSessionCapture.self)
     }
 
+    /// Inject the capture protocol into a custom URLSessionConfiguration.
+    /// URLProtocol.registerClass only takes effect on URLSession.shared
+    /// + the deprecated NSURLConnection path. Customer code that
+    /// constructs URLSession via `URLSession(configuration:)` bypasses
+    /// us unless we sit in their `configuration.protocolClasses`
+    /// array.
+    ///
+    /// Idempotent — calling twice with the same configuration leaves
+    /// only one entry. Customers wire this BEFORE handing the
+    /// configuration to URLSession.init since URLSession copies the
+    /// config at construction.
+    ///
+    ///     let cfg = URLSessionConfiguration.default
+    ///     URLSessionCapture.captureCustomConfiguration(cfg)
+    ///     let session = URLSession(configuration: cfg)
+    ///
+    /// Honours the same `enabled` gate as the auto-installed
+    /// protocol — when captureNetwork=false the prepended class is
+    /// still inert (canInit returns false), so this is safe to wire
+    /// at app launch regardless of the runtime capture flag.
+    static func captureCustomConfiguration(_ configuration: URLSessionConfiguration) {
+        var classes = configuration.protocolClasses ?? []
+        // Strip any existing entry first so the prepend is idempotent
+        // — protocolClasses is checked in order; we want to be first.
+        classes.removeAll { $0 == URLSessionCapture.self }
+        classes.insert(URLSessionCapture.self, at: 0)
+        configuration.protocolClasses = classes
+    }
+
     // MARK: - URLProtocol overrides
 
     override class func canInit(with request: URLRequest) -> Bool {
