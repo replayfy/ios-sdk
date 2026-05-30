@@ -1220,12 +1220,50 @@ final class ReplayCore {
     /// so subsequent taps carry the new screen name in uiId. Also
     /// fires an immediate snapshot so the dashboard sees the tagged
     /// screen with its new identity.
+    ///
+    /// Also emits a `custom { kind: "screen" }` event so the
+    /// dashboard's `/screens` endpoint has something to count.
+    /// Without this row, the dashboard's Screens tab shows
+    /// "No screens recorded" even after navigation — `pageCount`
+    /// on the Session row (driven by batch envelope page.url
+    /// increments) goes up, but the ClickHouse `kind='screen'`
+    /// rows that the Screens panel queries stay empty.
     func setRoute(_ route: String) {
+        let cleaned = route.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        let trimmed = String(cleaned.prefix(120))
         queue.sync {
-            tapTracker?.currentRoute = route
+            tapTracker?.currentRoute = trimmed
+        }
+        // Same-screen duplicate suppression. The auto-screen
+        // viewDidAppear swizzle re-fires on every re-presentation
+        // (modal dismiss, container child push). Without this dedup
+        // the Screens timeline fills with phantom rows.
+        let shouldEmit: Bool = queue.sync {
+            guard runtime != nil else { return false }
+            if lastEmittedScreen == trimmed { return false }
+            lastEmittedScreen = trimmed
+            return true
+        }
+        if shouldEmit {
+            let data = CustomEventData(
+                kind: "screen",
+                name: trimmed,
+                properties: ["name": AnyEncodable(trimmed)]
+            )
+            queue.sync {
+                guard let rt = runtime else { return }
+                pushLocked(rt: rt, type: "custom", data: data)
+            }
         }
         snapshotCapture?.captureNow(trigger: "manual")
     }
+
+    /// Last screen name we shipped a `kind="screen"` event for —
+    /// used by `setRoute` to dedupe the auto-screen detector firing
+    /// repeatedly with the same name. Reset to nil on session start.
+    /// All access goes through `queue.sync`.
+    private var lastEmittedScreen: String?
 
     // MARK: - Locked helpers (call from `queue.sync` only)
 
@@ -1261,6 +1299,10 @@ final class ReplayCore {
         // session's first snapshot fires a fresh upload (not
         // de-duped by the previous session's hash).
         snapshotCapture?.thumbnailUploader?.reset()
+        // Reset the per-session screen-dedup memo so the first
+        // setRoute call after a new session ships even if the
+        // route happens to match the last session's last screen.
+        lastEmittedScreen = nil
         // Emit session_start with the synthesized URL — the
         // tagScreenName engine (follow-up commit) will overwrite
         // the trailing segment when the customer or auto-tagger
