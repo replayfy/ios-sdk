@@ -354,6 +354,27 @@ public enum Replay {
         ReplayCore.shared.startNewSession()
     }
 
+    /// Override the host app's marketing version + build that the
+    /// SDK auto-detects from `CFBundleShortVersionString` +
+    /// `CFBundleVersion`. Used by:
+    ///
+    ///   - Cross-platform wrappers (React Native, Flutter, Cordova)
+    ///     whose JS / Dart bundle has its OWN version separate from
+    ///     the iOS host shell's.
+    ///   - White-label apps that brand each variant with its own
+    ///     marketing version.
+    ///
+    /// Call BEFORE `Replay.start(with:)` (or at app startup before
+    /// any session fires) so the FIRST batch carries the override.
+    /// Sticky for the process lifetime.
+    ///
+    /// Used by the backend symbolication service to pick the right
+    /// dSYM for crash stacks. Pass nil to clear the override and
+    /// fall back to Bundle.main.
+    public static func setAppVersion(_ version: String?, build: String? = nil) {
+        ReplayCore.shared.setAppVersionOverride(version: version, build: build)
+    }
+
     /// Wire network capture for a custom `URLSessionConfiguration`.
     /// The auto-installed `URLProtocol` only catches `URLSession.shared`
     /// + deprecated `NSURLConnection` paths — custom configurations

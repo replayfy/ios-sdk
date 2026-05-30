@@ -581,6 +581,27 @@ final class ReplayCore {
     private var snapshotPaused: Bool = false
 
     // -----------------------------------------------------------------
+    //  App-version override (UXCam-style customer-supplied versioning)
+    // -----------------------------------------------------------------
+    //
+    // CFBundleShortVersionString + CFBundleVersion are auto-read at
+    // session start; the backend symbolication service uses these
+    // to pick the right dSYM. Customers with non-default versioning
+    // (RN/Flutter wrappers carrying their OWN version, white-label
+    // builds that brand each variant differently) override via
+    // `Replay.setAppVersion(_:build:)`.
+
+    private var appVersionOverride: String?
+    private var appBuildOverride: String?
+
+    func setAppVersionOverride(version: String?, build: String?) {
+        queue.async {
+            self.appVersionOverride = version
+            self.appBuildOverride = build
+        }
+    }
+
+    // -----------------------------------------------------------------
     //  Session lifecycle controls (UXCam allowShortBreak +
     //  setMultiSessionRecord)
     // -----------------------------------------------------------------
@@ -1041,9 +1062,19 @@ final class ReplayCore {
 
     private func startNewSessionLocked() {
         guard let config else { return }
+        // Resolve app version per session so in-app update flows
+        // pick up new versions without a process restart. Cheap
+        // — Bundle reads are cached by Foundation.
+        let info = Bundle.main.infoDictionary
+        let resolvedVersion = appVersionOverride
+            ?? (info?["CFBundleShortVersionString"] as? String)
+        let resolvedBuild = appBuildOverride
+            ?? (info?["CFBundleVersion"] as? String)
         let rt = SessionRuntime(
             config: config,
-            deviceContext: DeviceContext.build()
+            deviceContext: DeviceContext.build(),
+            appVersion: resolvedVersion,
+            appBuild: resolvedBuild
         )
         runtime = rt
         // Reset the once-per-session thumbnail flag so the new

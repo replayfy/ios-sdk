@@ -285,6 +285,12 @@ public final class ReplayBridge: NSObject {
         Replay.reportBugEvent(name, description: description, properties: properties)
     }
 
+    /// `[Replay setAppVersion:@"2.4.1" build:@"412"]`
+    @objc(setAppVersion:build:)
+    public static func setAppVersion(_ version: String?, build: String?) {
+        Replay.setAppVersion(version, build: build)
+    }
+
     /// `[Replay captureURLSessionConfiguration: cfg]`
     @objc(captureURLSessionConfiguration:)
     public static func captureURLSessionConfiguration(_ configuration: URLSessionConfiguration) {

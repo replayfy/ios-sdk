@@ -31,7 +31,12 @@ final class SessionRuntime {
 
     private let config: ReplayConfig
 
-    init(config: ReplayConfig, deviceContext: ReplayPageContext) {
+    init(
+        config: ReplayConfig,
+        deviceContext: ReplayPageContext,
+        appVersion: String? = nil,
+        appBuild: String? = nil
+    ) {
         self.config = config
         self.deviceContext = deviceContext
         self.sessionId = "ses_" + UUID().uuidString
@@ -44,7 +49,9 @@ final class SessionRuntime {
         self.sdk = ReplaySdkDescriptor(
             name: BuildInfo.sdkName,
             version: BuildInfo.sdkVersion,
-            platform: Platform.ios
+            platform: Platform.ios,
+            appVersion: appVersion,
+            appBuild: appBuild
         )
         self.buffer.reserveCapacity(128)
     }

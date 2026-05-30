@@ -28,6 +28,15 @@ struct ReplaySdkDescriptor: Encodable {
     let name: String
     let version: String
     let platform: String
+    /// Host app's marketing version (CFBundleShortVersionString).
+    /// Backend symbolication service keys mapping.txt / dSYM
+    /// lookups by this. Nil only when the customer's Info.plist is
+    /// missing the field (very rare).
+    var appVersion: String? = nil
+    /// Host app's build number (CFBundleVersion). Paired with
+    /// appVersion to disambiguate hotfix builds with the same
+    /// marketing version.
+    var appBuild: String? = nil
 }
 
 /// "Page" is a misnomer on native — we reuse the field name for
