@@ -163,19 +163,88 @@ public enum Replay {
     }
     #endif
 
-    /// Pause schematic capture; events keep flowing.
+    /// Pause schematic capture — snapshots stop, taps + network +
+    /// console + perf events keep flowing. In-memory only; a
+    /// process restart resets to running. Use
+    /// ``optOutOfSchematicRecordings(_:)`` for a durable opt-out.
+    ///
+    /// Mirrors UXCam's `pauseScreenRecording()`.
     public static func pauseRecording() {
-        ReplayCore.shared.stub("pauseRecording")
+        ReplayCore.shared.setSnapshotPaused(true)
     }
 
-    /// Resume schematic capture after `pauseRecording`.
+    /// Resume schematic capture after ``pauseRecording()``.
+    /// Mirrors UXCam's `resumeScreenRecording()`.
     public static func resumeRecording() {
-        ReplayCore.shared.stub("resumeRecording")
+        ReplayCore.shared.setSnapshotPaused(false)
     }
 
-    /// Discard the current session entirely — no upload.
+    /// Discard the current session entirely — clears the in-memory
+    /// buffer AND deletes any on-disk batches still queued for
+    /// upload. The session never reaches the backend. Different
+    /// from ``stop()`` (graceful end + upload).
+    ///
+    /// Mirrors UXCam's `cancelCurrentSession()`.
     public static func cancelSession() {
-        ReplayCore.shared.stub("cancelSession")
+        ReplayCore.shared.cancelCurrentSession()
+    }
+
+    // -----------------------------------------------------------------
+    //  UXCam-parity GDPR opt-in / opt-out
+    // -----------------------------------------------------------------
+
+    /// Overall opt-out. When set to true: every event drops at the
+    /// emit gate, no snapshots fire, no uploads happen. Persisted
+    /// across launches via UserDefaults. The customer MUST call
+    /// again with false to start recording again.
+    ///
+    /// Mirrors UXCam's `optOutOverall()` / `optInOverall()` —
+    /// collapsed to one boolean for the idiomatic Swift shape.
+    public static func optOutOverall(_ optOut: Bool) {
+        ReplayCore.shared.setOverallOptOut(optOut)
+    }
+
+    /// Whether the customer is currently opted out overall.
+    public static var isOptedOutOverall: Bool {
+        ReplayCore.shared.isOverallOptedOut
+    }
+
+    /// Schematic (snapshot-only) opt-out. When set to true: pixel
+    /// capture stops but every other event type keeps flowing.
+    /// Persisted across launches.
+    ///
+    /// Mirrors UXCam's `optOutOfSchematicRecordings()` /
+    /// `optIntoSchematicRecordings()`.
+    public static func optOutOfSchematicRecordings(_ optOut: Bool) {
+        ReplayCore.shared.setSchematicOptOut(optOut)
+    }
+
+    /// Whether schematic (snapshot) recording is currently opted out.
+    public static var isOptedOutOfSchematicRecordings: Bool {
+        ReplayCore.shared.isSchematicOptedOut
+    }
+
+    // -----------------------------------------------------------------
+    //  UXCam-parity deep-link helpers
+    // -----------------------------------------------------------------
+
+    /// Dashboard URL for the current session, or nil when no
+    /// session is active. Derived from `ReplayConfig.apiHost`
+    /// by substituting `://api.` with `://app.`. Self-hosted
+    /// customers' hosts work unchanged.
+    ///
+    /// Mirrors UXCam's `urlForCurrentSession()`.
+    public static func urlForCurrentSession() -> String? {
+        ReplayCore.shared.urlForCurrentSession
+    }
+
+    /// Dashboard URL for the currently-identified user (all
+    /// sessions for the active distinctId), or nil when no
+    /// `identify()` has been called yet.
+    ///
+    /// Mirrors UXCam's `urlForCurrentUser()`.
+    public static func urlForCurrentUser() -> String? {
+        ReplayCore.shared.urlForCurrentUser
     }
 
     /// Attach a sticky property to the END USER (persists across

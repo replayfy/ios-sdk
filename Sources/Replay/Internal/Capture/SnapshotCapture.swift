@@ -84,9 +84,20 @@ final class SnapshotCapture {
     /// hop yields back to the runloop, lets pending layout +
     /// CADisplayLink flushes complete, then the capture sees the
     /// rendered hierarchy.
+    /// Runtime gate that ReplayCore flips when the customer calls
+    /// `pauseRecording()` / `Replay.optOutOfSchematicRecordings(true)`.
+    /// Defaults to true (recording). When false: every entry point
+    /// — captureNow, scheduleIdle, screen-resume callback — early-
+    /// exits without touching the view tree or the bitmap pipeline.
+    /// Independent of the SDK's overall opt-out state (which
+    /// short-circuits at the pushLocked level).
+    var enabled: Bool = true
+
     func captureNow(trigger: String) {
+        if !enabled { return }
         DispatchQueue.main.async { [weak self] in
-            self?.doCapture(trigger: trigger)
+            guard let self = self, self.enabled else { return }
+            self.doCapture(trigger: trigger)
         }
     }
 
@@ -94,6 +105,7 @@ final class SnapshotCapture {
     /// previously-scheduled idle captures so only the latest trigger
     /// fires.
     func scheduleIdle() {
+        if !enabled { return }
         let myGen = generationLock.withLock {
             generation += 1
             return generation

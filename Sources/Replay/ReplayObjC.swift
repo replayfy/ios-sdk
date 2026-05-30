@@ -261,4 +261,36 @@ public final class ReplayBridge: NSObject {
     public static func stopApplicationAndUploadData(timeoutSeconds: TimeInterval) {
         Replay.stopApplicationAndUploadData(timeoutSeconds: timeoutSeconds)
     }
+
+    /// `[Replay optOutOverall: YES]`
+    @objc(optOutOverall:)
+    public static func optOutOverall(_ optOut: Bool) {
+        Replay.optOutOverall(optOut)
+    }
+
+    /// `BOOL out = [Replay isOptedOutOverall];`
+    @objc public static var isOptedOutOverall: Bool {
+        Replay.isOptedOutOverall
+    }
+
+    /// `[Replay optOutOfSchematicRecordings: YES]`
+    @objc(optOutOfSchematicRecordings:)
+    public static func optOutOfSchematicRecordings(_ optOut: Bool) {
+        Replay.optOutOfSchematicRecordings(optOut)
+    }
+
+    /// `BOOL out = [Replay isOptedOutOfSchematicRecordings];`
+    @objc public static var isOptedOutOfSchematicRecordings: Bool {
+        Replay.isOptedOutOfSchematicRecordings
+    }
+
+    /// `NSString *url = [Replay urlForCurrentSession];` — nullable.
+    @objc public static func urlForCurrentSession() -> String? {
+        Replay.urlForCurrentSession()
+    }
+
+    /// `NSString *url = [Replay urlForCurrentUser];` — nullable.
+    @objc public static func urlForCurrentUser() -> String? {
+        Replay.urlForCurrentUser()
+    }
 }

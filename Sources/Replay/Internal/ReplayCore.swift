@@ -63,6 +63,15 @@ final class ReplayCore {
     /// Mirrors the Android SDK's `init` — sets up sender, lifecycle
     /// observer, periodic flush, fires session_start.
     func start(config: ReplayConfig) {
+        // Honour a persisted overall opt-out BEFORE doing any
+        // setup work. Customer-side persisted "Do not sell my
+        // data" flips persist across launches; we must not even
+        // open the network channel or install the lifecycle
+        // observer when opted out.
+        if OptOutStore.shared.overallOptOut {
+            ReplayLog.info("Replay SDK opted out — skipping start()")
+            return
+        }
         queue.sync {
             guard !initialized else {
                 ReplayLog.warn("Replay.start called twice — ignoring second call")
@@ -458,6 +467,117 @@ final class ReplayCore {
     /// hang the host app. Returns early on success; logs + returns
     /// on timeout. Always tears down regardless of upload outcome
     /// — the disk-queue picks up unsent batches on next start().
+    // -----------------------------------------------------------------
+    //  GDPR opt-in / opt-out (UXCam parity)
+    // -----------------------------------------------------------------
+
+    /// Snapshot-pipeline pause flag — toggled by `Replay.pauseRecording` /
+    /// `resumeRecording`. Independent of opt-out (a privacy setting,
+    /// persisted across launches; this is a runtime toggle, in-memory only).
+    private var snapshotPaused: Bool = false
+
+    /// Set the overall opt-out flag. When true: every `pushLocked`
+    /// call silently drops, no new sessions start, no uploads
+    /// fire. Persisted across launches via UserDefaults.
+    ///
+    /// Calling with true while a session is running ALSO tears
+    /// down the runtime — customers opting out mid-flow expect
+    /// everything to halt immediately.
+    func setOverallOptOut(_ optedOut: Bool) {
+        OptOutStore.shared.overallOptOut = optedOut
+        if optedOut { stop() }
+    }
+
+    /// Get the persisted overall opt-out flag.
+    var isOverallOptedOut: Bool { OptOutStore.shared.overallOptOut }
+
+    /// Set the schematic opt-out flag. When true: snapshots stop
+    /// being captured + native_snapshot events drop at
+    /// `pushLocked`. Other event types (tap, network, console,
+    /// perf) keep flowing. Persisted across launches.
+    func setSchematicOptOut(_ optedOut: Bool) {
+        OptOutStore.shared.schematicOptOut = optedOut
+        syncSnapshotEnabled()
+    }
+
+    /// Get the persisted schematic-capture opt-out flag.
+    var isSchematicOptedOut: Bool { OptOutStore.shared.schematicOptOut }
+
+    /// Compute SnapshotCapture.enabled from the two independent
+    /// toggles (paused + schematic-opt-out) and push it down.
+    private func syncSnapshotEnabled() {
+        let optedOut = OptOutStore.shared.schematicOptOut
+        let want = !snapshotPaused && !optedOut
+        queue.async { [weak self] in
+            self?.snapshotCapture?.enabled = want
+        }
+    }
+
+    /// Runtime pause toggle. Independent of opt-out — pauses only
+    /// the snapshot pipeline; events keep flowing. NOT persisted:
+    /// process restart resets to running.
+    func setSnapshotPaused(_ paused: Bool) {
+        snapshotPaused = paused
+        syncSnapshotEnabled()
+    }
+
+    var isSnapshotPaused: Bool { snapshotPaused }
+
+    // -----------------------------------------------------------------
+    //  cancelSession + dashboard deep-link helpers
+    // -----------------------------------------------------------------
+
+    /// Discard the current session — clears the in-memory buffer
+    /// AND deletes any on-disk batches still queued for upload so
+    /// the session never reaches the backend. Different from
+    /// `stop()` (graceful end + upload).
+    func cancelCurrentSession() {
+        queue.sync {
+            if let rt = runtime {
+                // Drop buffered events without emitting session_end
+                // (we're abandoning the session, not closing it).
+                _ = rt.drain()
+                runtime = nil
+            }
+            flushTask?.cancel()
+            flushTask = nil
+        }
+        uploader?.clearQueue()
+        perfMetrics?.stop()
+        perfMetrics = nil
+        consoleCapture?.stop()
+        consoleCapture = nil
+    }
+
+    /// Dashboard URL for the current session, or nil when no
+    /// session is active. Derived from `config.apiHost` by
+    /// substituting `://api.` with `://app.` so
+    /// `https://api.replayfy.io` → `https://app.replayfy.io`.
+    var urlForCurrentSession: String? {
+        let sessionId: String? = queue.sync { runtime?.sessionId }
+        guard let sid = sessionId, let host = dashboardHost else { return nil }
+        return "\(host)/sessions/\(sid)"
+    }
+
+    /// Dashboard URL for the currently-identified user, or nil
+    /// when no `identify()` has been called yet.
+    var urlForCurrentUser: String? {
+        let did: String? = queue.sync { sender?.identity?.distinctId }
+        guard let d = did, let host = dashboardHost else { return nil }
+        return "\(host)/users/\(d)"
+    }
+
+    private var dashboardHost: String? {
+        guard let api = config?.apiHost else { return nil }
+        let trimmed = api.hasSuffix("/")
+            ? String(api.dropLast())
+            : api
+        if let range = trimmed.range(of: "://api.") {
+            return trimmed.replacingCharacters(in: range, with: "://app.")
+        }
+        return trimmed
+    }
+
     func stopApplicationAndUploadData(timeoutSeconds: TimeInterval = 5) {
         let willFlush: Bool = queue.sync {
             guard let rt = runtime else { return false }
@@ -769,6 +889,15 @@ final class ReplayCore {
     }
 
     private func pushLocked<T: Encodable>(rt: SessionRuntime, type: String, data: T) {
+        // Overall opt-out → silently drop. Single gate over the
+        // entire emit pipeline; every emit (tap, snapshot, crash,
+        // perf, identify-induced events) lands here.
+        if OptOutStore.shared.overallOptOut { return }
+        // Schematic opt-out → drop native_snapshot events only.
+        // Other timelines (taps, network, console, perf) keep
+        // flowing so the dashboard still shows an interaction
+        // record even with no pixel data.
+        if type == "native_snapshot", OptOutStore.shared.schematicOptOut { return }
         let now = SessionRuntime.nowMs()
         let event = ReplayEvent(
             id: rt.makeEventId(),
