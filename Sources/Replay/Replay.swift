@@ -354,6 +354,68 @@ public enum Replay {
         ReplayCore.shared.startNewSession()
     }
 
+    /// Allow brief backgrounding (≤ `windowSeconds`, default 30 s)
+    /// WITHOUT ending the session. The same session resumes when
+    /// the user returns. Default off.
+    ///
+    /// Mirrors UXCam's `allowShortBreakForAnotherApp(_:)`.
+    public static func allowShortBreakForAnotherApp(
+        _ allow: Bool,
+        windowSeconds: TimeInterval = 30
+    ) {
+        ReplayCore.shared.setAllowShortBreak(allow, windowSeconds: windowSeconds)
+    }
+
+    /// Toggle multi-session recording per app launch. When false,
+    /// only ONE session fires per process — subsequent
+    /// foregroundings after a session_end are no-ops. Default true.
+    ///
+    /// Mirrors UXCam's `setMultiSessionRecord(_:)`.
+    public static func setMultiSessionRecord(_ enabled: Bool) {
+        ReplayCore.shared.setMultiSessionRecord(enabled)
+    }
+
+    /// Register a callback that fires after the SDK's first
+    /// successful batch upload (server-side handshake confirmed).
+    /// Used during onboarding so the customer's "Verify integration"
+    /// UI can light up.
+    ///
+    /// If verification has ALREADY fired this process the closure
+    /// runs synchronously on the calling thread. Otherwise it
+    /// runs on the MAIN thread when the next upload succeeds.
+    /// One-shot per process.
+    ///
+    /// Returns a token used to remove the listener later. Mirrors
+    /// UXCam's `addVerificationListener(VerificationListener)`.
+    @discardableResult
+    public static func addVerificationListener(_ listener: @escaping () -> Void) -> UUID {
+        return ReplayCore.shared.addVerificationListener(listener)
+    }
+
+    /// Drop a previously-added verification listener.
+    public static func removeVerificationListener(_ token: UUID) {
+        ReplayCore.shared.removeVerificationListener(token)
+    }
+
+    /// Manual bug-report event. Wire to a "Send Feedback" /
+    /// "Report Issue" button — the dashboard surfaces these as
+    /// flagged events in the session timeline + a fresh snapshot
+    /// fires so the report timestamp ships with the screen the
+    /// user was looking at.
+    ///
+    /// Mirrors UXCam's `reportBugEvent(name:description:)`.
+    public static func reportBugEvent(
+        _ name: String,
+        description: String? = nil,
+        properties: [String: Any]? = nil
+    ) {
+        ReplayCore.shared.reportBugEvent(
+            name: name,
+            description: description,
+            properties: properties
+        )
+    }
+
     /// Stop recording AND block (up to `timeoutSeconds`) until the
     /// in-memory buffer has been uploaded or persisted to disk.
     /// Call this from `applicationWillTerminate` or a sign-out

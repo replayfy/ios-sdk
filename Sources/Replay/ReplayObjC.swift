@@ -275,6 +275,46 @@ public final class ReplayBridge: NSObject {
         Replay.startNewSession()
     }
 
+    /// `[Replay reportBugEventWithName:@"crash_at_checkout" description:@"…" properties:@{…}]`
+    @objc(reportBugEventWithName:description:properties:)
+    public static func reportBugEvent(
+        name: String,
+        description: String?,
+        properties: [String: Any]?
+    ) {
+        Replay.reportBugEvent(name, description: description, properties: properties)
+    }
+
+    /// `[Replay allowShortBreakForAnotherApp: YES windowSeconds: 30.0]`
+    @objc(allowShortBreakForAnotherApp:windowSeconds:)
+    public static func allowShortBreakForAnotherApp(
+        _ allow: Bool,
+        windowSeconds: TimeInterval
+    ) {
+        Replay.allowShortBreakForAnotherApp(allow, windowSeconds: windowSeconds)
+    }
+
+    /// `[Replay setMultiSessionRecord: YES]`
+    @objc(setMultiSessionRecord:)
+    public static func setMultiSessionRecord(_ enabled: Bool) {
+        Replay.setMultiSessionRecord(enabled)
+    }
+
+    /// `NSUUID *token = [Replay addVerificationListener:^{ … }];`
+    ///
+    /// ObjC bridge: forwards the closure to Swift + returns the
+    /// UUID token wrapped as NSUUID for `removeVerificationListener:`.
+    @objc(addVerificationListener:)
+    public static func addVerificationListener(_ listener: @escaping () -> Void) -> UUID {
+        return Replay.addVerificationListener(listener)
+    }
+
+    /// `[Replay removeVerificationListener: token];`
+    @objc(removeVerificationListener:)
+    public static func removeVerificationListener(_ token: UUID) {
+        Replay.removeVerificationListener(token)
+    }
+
     /// `[Replay stopApplicationAndUploadDataWithTimeout: 5.0]`
     @objc(stopApplicationAndUploadDataWithTimeout:)
     public static func stopApplicationAndUploadData(timeoutSeconds: TimeInterval) {

@@ -85,6 +85,13 @@ final class ReplayCore {
             // through this so failed batches land on disk and get
             // drained on next foreground.
             self.uploader = BatchUploader(config: config, sender: sender)
+            // Re-wire the verification callback now that uploader
+            // exists — covers the case where the customer
+            // registered a listener BEFORE start() completed.
+            let hasListeners = self.verificationLock.withLock {
+                !self.verificationListeners.isEmpty
+            }
+            if hasListeners { self.wireVerificationCallback() }
             // One-shot drain attempt to pick up any batches queued
             // during a previous process lifetime. Fire-and-forget;
             // don't block start.
@@ -432,6 +439,103 @@ final class ReplayCore {
         }
     }
 
+    // -----------------------------------------------------------------
+    //  Verification listeners (UXCam onboarding parity)
+    // -----------------------------------------------------------------
+
+    /// Verification listeners — fired after the SDK's first
+    /// successful batch upload (server-side handshake confirmed).
+    /// Used during onboarding for "Verify integration" UI badges.
+    ///
+    /// One-shot per process: after the first upload succeeds the
+    /// listeners drain + no further uploads re-fire them.
+    private let verificationLock = NSLock()
+    private var verificationListeners: [UUID: () -> Void] = [:]
+    private var verificationFired: Bool = false
+
+    /// Register a listener; returns a token used to remove it
+    /// later. If verification has ALREADY fired this process the
+    /// listener runs synchronously on the calling thread.
+    /// Otherwise it runs on the MAIN thread when the next upload
+    /// succeeds.
+    @discardableResult
+    func addVerificationListener(_ listener: @escaping () -> Void) -> UUID {
+        let token = UUID()
+        verificationLock.lock()
+        if verificationFired {
+            verificationLock.unlock()
+            listener()
+            return token
+        }
+        verificationListeners[token] = listener
+        verificationLock.unlock()
+        wireVerificationCallback()
+        return token
+    }
+
+    func removeVerificationListener(_ token: UUID) {
+        verificationLock.withLock { _ = verificationListeners.removeValue(forKey: token) }
+    }
+
+    private func wireVerificationCallback() {
+        guard let up = uploader else { return }
+        if verificationFired { return }
+        up.onFirstUploadSuccess = { [weak self] in
+            guard let self = self else { return }
+            self.verificationLock.lock()
+            self.verificationFired = true
+            let toFire = Array(self.verificationListeners.values)
+            self.verificationListeners.removeAll()
+            self.verificationLock.unlock()
+            // Hop to main for the customer's UI work.
+            DispatchQueue.main.async {
+                for l in toFire { l() }
+            }
+        }
+    }
+
+    /// Emit a manual bug-report event. UXCam customers wire this
+    /// to a "Send Feedback" / "Report Issue" button — the
+    /// dashboard surfaces these as flagged events in the session
+    /// timeline so support can jump to the relevant moment with
+    /// the screen the user was looking at.
+    ///
+    /// Triggers an IMMEDIATE snapshot so fresh pixels accompany
+    /// the report timestamp regardless of the regular capture
+    /// cadence. Mirrors UXCam's `reportBugEvent(name:description:)`.
+    func reportBugEvent(
+        name: String,
+        description: String? = nil,
+        properties: [String: Any]? = nil
+    ) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let safeName = String(trimmed.prefix(80))
+        // Merge description into properties under a reserved key
+        // so the dashboard can render it as the prominent body.
+        var merged: [String: Any] = properties ?? [:]
+        if let d = description, !d.trimmingCharacters(in: .whitespaces).isEmpty {
+            merged["description"] = String(d.prefix(2_000))
+        }
+        let data = CustomEventData(
+            kind: "bug_report",
+            name: safeName,
+            properties: safeProps(merged)
+        )
+        queue.async {
+            if let rt = self.runtime {
+                self.pushLocked(rt: rt, type: "custom", data: data)
+            } else {
+                self.pendingTracks.append(data)
+            }
+            // Fire a fresh snapshot so the dashboard has the
+            // current screen at the bug-report timestamp.
+            // Off-main async hop — captureNow itself dispatches
+            // back to main internally.
+            self.snapshotCapture?.captureNow(trigger: "bug_report")
+        }
+    }
+
     /// Force-end the current session + start a fresh one. UXCam's
     /// `startNewSession()` — used by customers who track logical
     /// boundaries (user logout → login as different user; A/B
@@ -475,6 +579,43 @@ final class ReplayCore {
     /// `resumeRecording`. Independent of opt-out (a privacy setting,
     /// persisted across launches; this is a runtime toggle, in-memory only).
     private var snapshotPaused: Bool = false
+
+    // -----------------------------------------------------------------
+    //  Session lifecycle controls (UXCam allowShortBreak +
+    //  setMultiSessionRecord)
+    // -----------------------------------------------------------------
+
+    private var allowShortBreak: Bool = false
+    private var shortBreakSeconds: TimeInterval = 30
+    private var multiSessionRecord: Bool = true
+    /// Counter incremented on every startNewSessionLocked invocation;
+    /// used by the multiSessionRecord=false gate to skip subsequent
+    /// foregroundings.
+    private var sessionsThisProcess: Int = 0
+    /// When allowShortBreak is on, the DispatchWorkItem scheduled to
+    /// fire session_end after shortBreakSeconds. Cancelled by
+    /// onAppForegrounded if the user returns in time.
+    private var pendingShortBreakWorkItem: DispatchWorkItem?
+
+    /// Toggle short-break behaviour. When true, a backgrounding
+    /// of ≤ [windowSeconds] does NOT end the session — the same
+    /// session resumes when the user returns. Default false.
+    /// Mirrors UXCam's `allowShortBreakForAnotherApp(_:)`.
+    func setAllowShortBreak(_ allow: Bool, windowSeconds: TimeInterval = 30) {
+        allowShortBreak = allow
+        shortBreakSeconds = max(0, windowSeconds)
+    }
+
+    var isAllowShortBreak: Bool { allowShortBreak }
+
+    /// When false, only ONE session fires per app process.
+    /// Subsequent foregroundings after session_end are no-ops.
+    /// Default true. Mirrors UXCam's `setMultiSessionRecord(_:)`.
+    func setMultiSessionRecord(_ enabled: Bool) {
+        multiSessionRecord = enabled
+    }
+
+    var isMultiSessionRecord: Bool { multiSessionRecord }
 
     /// Set the overall opt-out flag. When true: every `pushLocked`
     /// call silently drops, no new sessions start, no uploads
@@ -625,10 +766,29 @@ final class ReplayCore {
     // MARK: - Lifecycle
 
     private func onAppForegrounded() {
+        // If a short-break end is pending, cancel it — the user is
+        // returning to the SAME session, not starting a new one.
+        // pendingShortBreakWorkItem holds the closure DispatchQueue
+        // would have run after shortBreakSeconds; cancel() makes it
+        // a no-op when the scheduled time arrives.
+        if let item = pendingShortBreakWorkItem {
+            item.cancel()
+            pendingShortBreakWorkItem = nil
+            // Runtime still alive → nothing else to do.
+            let isAlive = queue.sync { runtime != nil }
+            if isAlive { return }
+        }
         queue.sync {
             guard config != nil else { return }
             guard runtime == nil else { return }
+            // setMultiSessionRecord(false) gate: skip new session
+            // when one has already existed this process.
+            if !multiSessionRecord && sessionsThisProcess > 0 {
+                ReplayLog.info("multiSessionRecord=false — skipping new session on foreground")
+                return
+            }
             startNewSessionLocked()
+            sessionsThisProcess += 1
         }
         // Cold-start measurement — emit once per process. The
         // measurement runs ReplayCore.init → first foreground,
@@ -656,6 +816,32 @@ final class ReplayCore {
     }
 
     private func onAppBackgrounded() {
+        // allowShortBreak — schedule the session_end for shortBreakSeconds
+        // into the future instead of firing immediately. Foregrounding
+        // before then cancels the work item via onAppForegrounded.
+        if allowShortBreak && shortBreakSeconds > 0 {
+            let isAlive = queue.sync { runtime != nil }
+            if !isAlive { return }
+            pendingShortBreakWorkItem?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.pendingShortBreakWorkItem = nil
+                let rtf: SessionRuntime? = self.queue.sync {
+                    guard let rt = self.runtime else { return nil }
+                    let data = SessionEndEventData(reason: "background")
+                    self.pushLocked(rt: rt, type: "session_end", data: data)
+                    return rt
+                }
+                if rtf != nil {
+                    Task.detached(priority: .utility) { [weak self] in
+                        await self?.flushNow()
+                    }
+                }
+            }
+            pendingShortBreakWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + shortBreakSeconds, execute: item)
+            return
+        }
         let runtimeToFlush: SessionRuntime? = queue.sync {
             guard let rt = runtime else { return nil }
             let data = SessionEndEventData(reason: "background")

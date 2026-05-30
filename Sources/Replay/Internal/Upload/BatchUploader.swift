@@ -23,12 +23,37 @@ final class BatchUploader {
         self.storage = storage
     }
 
+    /// One-shot callback fired the first time a batch successfully
+    /// reaches the backend. Used by ``ReplayCore`` to drain
+    /// verification listeners registered via
+    /// `Replay.addVerificationListener` — mirrors UXCam's
+    /// `VerificationListener.onVerificationSuccess`.
+    ///
+    /// Cleared after firing once so subsequent uploads don't
+    /// re-notify. Accessed via a lock so concurrent uploads can't
+    /// double-fire if the customer registers a listener mid-batch.
+    private let firstUploadLock = NSLock()
+    private var _onFirstUploadSuccess: (() -> Void)?
+    var onFirstUploadSuccess: (() -> Void)? {
+        get { firstUploadLock.withLock { _onFirstUploadSuccess } }
+        set { firstUploadLock.withLock { _onFirstUploadSuccess = newValue } }
+    }
+
     /// Send the envelope. Returns true on live success, false when
     /// we fell back to queueing (or if even queueing failed).
     @discardableResult
     func upload(_ envelope: ReplayBatchEnvelope) async -> Bool {
         let ok = await sender.send(envelope)
-        if ok { return true }
+        if ok {
+            // Fire-and-clear the verification callback exactly once.
+            let cb: (() -> Void)? = firstUploadLock.withLock {
+                let c = _onFirstUploadSuccess
+                _onFirstUploadSuccess = nil
+                return c
+            }
+            cb?()
+            return true
+        }
 
         // Live send failed → serialize once + persist.
         let json: Data
