@@ -56,6 +56,63 @@ final class PrivacyRegistry {
     var occludeAllScreen: Bool = false
 
     // -----------------------------------------------------------------
+    //  Per-class occlusion (UXCam applyOcclusion / removeOcclusion)
+    // -----------------------------------------------------------------
+    //
+    // Customers can register arbitrary UIView subclasses; every
+    // instance on screen gets the stripe overlay. Goes beyond the
+    // bulk UITextField / UILabel flags — useful for custom widgets
+    // (e.g. CreditCardInputView, MedicalRecordCard) that should be
+    // default-occluded across every screen they appear on.
+
+    #if canImport(UIKit)
+    private let occludedClassesLock = NSLock()
+    /// Set of UIView (sub-)class types registered for occlusion.
+    /// Swift metatypes are AnyObject-bridgeable; we hash by
+    /// `ObjectIdentifier(type)` so adds are O(1).
+    private var occludedClassIds: Set<ObjectIdentifier> = []
+    /// Parallel list of the actual UIView.Type values — used to
+    /// run `view.isKind(of:)` since ObjectIdentifier loses the
+    /// concrete type. Kept in sync with `occludedClassIds`.
+    private var occludedClasses: [UIView.Type] = []
+
+    /// Register a UIView subclass for occlusion. Idempotent —
+    /// adding the same class twice is a no-op.
+    func applyOcclusion(_ cls: UIView.Type) {
+        occludedClassesLock.withLock {
+            let id = ObjectIdentifier(cls)
+            if occludedClassIds.insert(id).inserted {
+                occludedClasses.append(cls)
+            }
+        }
+    }
+
+    /// Unregister a previously-added class. Safe to call for
+    /// classes that were never added.
+    func removeOcclusion(_ cls: UIView.Type) {
+        occludedClassesLock.withLock {
+            let id = ObjectIdentifier(cls)
+            if occludedClassIds.remove(id) != nil {
+                occludedClasses.removeAll { ObjectIdentifier($0) == id }
+            }
+        }
+    }
+
+    /// Whether [view] is an instance of any registered class.
+    /// Hot path — early-out on the empty set is the common case
+    /// (most apps never call applyOcclusion).
+    func matchesOccludedClass(_ view: UIView) -> Bool {
+        if occludedClasses.isEmpty { return false }
+        return occludedClassesLock.withLock {
+            for cls in occludedClasses {
+                if view.isKind(of: cls) { return true }
+            }
+            return false
+        }
+    }
+    #endif
+
+    // -----------------------------------------------------------------
     //  Pending one-shot rects (RN / Flutter bridges)
     // -----------------------------------------------------------------
     //
@@ -124,6 +181,11 @@ final class PrivacyRegistry {
         if occludeAllTextViews, view is UILabel {
             return true
         }
+        // Per-class occlusion (applyOcclusion). Cheap when no
+        // classes registered (early-out on empty set).
+        if matchesOccludedClass(view) {
+            return true
+        }
         return lock.withLock {
             if table.contains(view) { return true }
             var current: UIView? = view.superview
@@ -145,7 +207,8 @@ final class PrivacyRegistry {
     func bulkBounds(within root: UIView) -> [CGRect] {
         let wantFields = occludeAllTextFields
         let wantLabels = occludeAllTextViews
-        guard wantFields || wantLabels else { return [] }
+        let hasClassFilter = !occludedClasses.isEmpty
+        guard wantFields || wantLabels || hasClassFilter else { return [] }
         var out: [CGRect] = []
         walkBulk(root, root: root, wantFields: wantFields, wantLabels: wantLabels, out: &out)
         return out
@@ -162,7 +225,11 @@ final class PrivacyRegistry {
               view.bounds.width > 0, view.bounds.height > 0
         else { return }
         let matches = (wantFields && (view is UITextField || view is UITextView)) ||
-                      (wantLabels && view is UILabel)
+                      (wantLabels && view is UILabel) ||
+                      // Per-class occlusion (applyOcclusion). Cheap
+                      // when no classes registered (empty-set early-
+                      // out lives inside matchesOccludedClass).
+                      matchesOccludedClass(view)
         if matches {
             out.append(view.convert(view.bounds, to: root))
             // Don't recurse — text widgets don't contain other

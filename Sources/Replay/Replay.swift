@@ -133,6 +133,27 @@ public enum Replay {
         PrivacyRegistry.shared.occludeAllTextViews = occlude
     }
 
+    /// Register a `UIView` subclass for occlusion — every instance
+    /// (including subclasses) on screen gets the stripe overlay.
+    /// Goes beyond the bulk `UITextField` / `UILabel` flags: use
+    /// when the app has custom widgets (e.g. CreditCardInputView,
+    /// MedicalRecordCard) that should be default-occluded across
+    /// every screen they appear on.
+    ///
+    /// Cheap when no classes registered (~zero overhead). Class
+    /// set size is typically single-digit in practice.
+    ///
+    /// Mirrors UXCam's `applyOcclusion(_:)`.
+    public static func applyOcclusion(_ viewClass: UIView.Type) {
+        PrivacyRegistry.shared.applyOcclusion(viewClass)
+    }
+
+    /// Unregister a previously-added occluded class. Safe to call
+    /// for classes that were never registered.
+    public static func removeOcclusion(_ viewClass: UIView.Type) {
+        PrivacyRegistry.shared.removeOcclusion(viewClass)
+    }
+
     /// Paint the ENTIRE captured snapshot with the diagonal-stripe
     /// occlusion overlay. Nuclear option for screens where the
     /// customer doesn't want ANY pixel data to leave the device

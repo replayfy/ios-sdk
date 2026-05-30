@@ -180,6 +180,25 @@ public final class ReplayBridge: NSObject {
         Replay.occludeSensitiveScreen(occlude)
     }
 
+    /// `[Replay applyOcclusionForClass: [MyCustomView class]]`
+    /// ObjC bridge — accepts AnyClass + checks it's a UIView
+    /// subclass before forwarding. Silent no-op on non-UIView
+    /// classes so misuse from ObjC can't crash the host app.
+    @objc(applyOcclusionForClass:)
+    public static func applyOcclusion(_ cls: AnyClass) {
+        if let viewCls = cls as? UIView.Type {
+            Replay.applyOcclusion(viewCls)
+        }
+    }
+
+    /// `[Replay removeOcclusionForClass: [MyCustomView class]]`
+    @objc(removeOcclusionForClass:)
+    public static func removeOcclusion(_ cls: AnyClass) {
+        if let viewCls = cls as? UIView.Type {
+            Replay.removeOcclusion(viewCls)
+        }
+    }
+
     /// `[Replay occludeRectsOnNextFrame: @[[NSValue valueWithCGRect:r1], …]]`
     ///
     /// ObjC has no native [CGRect] array — RN / Cordova bridges pass
