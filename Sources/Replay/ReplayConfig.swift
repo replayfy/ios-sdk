@@ -66,6 +66,19 @@ public struct ReplayConfig {
     /// `tagScreenName` explicitly.
     public let autoScreenName: Bool
 
+    /// Pull configuration from the dashboard's `/v1/sdk/config`
+    /// endpoint and let it OVERRIDE the values supplied here. When
+    /// true (default), every customer-passed field that maps to a
+    /// dashboard setting becomes a fallback used only during the
+    /// cold-launch first-fetch race. After the first successful
+    /// fetch the dashboard always wins — including subsequent
+    /// flips while the session is running (15-min refresh cycle).
+    ///
+    /// Set to false ONLY when the customer intentionally wants
+    /// hard-coded behaviour (kiosk apps, smoke tests, white-label
+    /// builds whose dashboard isn't theirs).
+    public let useRemoteConfig: Bool
+
     public init(
         apiKey: String,
         apiHost: String,
@@ -80,7 +93,8 @@ public struct ReplayConfig {
         captureHeaders: Bool = false,
         maxBodyBytes: Int = 4_096,
         captureSnapshotPixels: Bool = true,
-        autoScreenName: Bool = true
+        autoScreenName: Bool = true,
+        useRemoteConfig: Bool = true
     ) {
         self.apiKey = apiKey
         self.apiHost = apiHost
@@ -96,5 +110,6 @@ public struct ReplayConfig {
         self.maxBodyBytes = maxBodyBytes
         self.captureSnapshotPixels = captureSnapshotPixels
         self.autoScreenName = autoScreenName
+        self.useRemoteConfig = useRemoteConfig
     }
 }

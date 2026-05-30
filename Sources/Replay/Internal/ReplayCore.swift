@@ -41,6 +41,23 @@ final class ReplayCore {
     private var crashHandler: CrashHandler?
     private var consoleCapture: ConsoleCapture?
 
+    /// Dashboard remote-config fetcher. Pulls /v1/sdk/config every
+    /// 15 min + applies the result, overriding the customer-passed
+    /// ``ReplayConfig`` fields it covers. Null when
+    /// `ReplayConfig.useRemoteConfig=false` or after stop().
+    private var remoteConfigFetcher: RemoteConfigFetcher?
+
+    /// Last applied remote config. Null until first fetch or
+    /// cached cold-launch apply. Read by sampling + push gates.
+    private var remoteConfig: RemoteConfig?
+
+    /// Per-session sampling decision — set once in
+    /// `startNewSessionLocked()`. When true, every subsequent
+    /// emit drops at `pushLocked()` (except session_start +
+    /// session_end which always go through so the dashboard can
+    /// count sampled-out sessions).
+    private var sessionSampledOut: Bool = false
+
     /// Events captured before the first foreground (== before
     /// `runtime` exists). iOS has no equivalent of Android's
     /// ContentProvider auto-bootstrap that runs before
@@ -227,6 +244,27 @@ final class ReplayCore {
             }
 
             ReplayLog.info("Replay.start complete")
+        }
+
+        // Remote-config fetcher — pulls dashboard settings + applies
+        // them, OVERRIDING the customer-passed ReplayConfig fields
+        // it covers. Cold launches use last-known-good from
+        // UserDefaults; periodic refresh (every 15 min) propagates
+        // dashboard flips mid-session. Customers opt out via
+        // ReplayConfig.useRemoteConfig=false (kiosk / smoke-test).
+        //
+        // Created OUTSIDE the queue.sync block above because the
+        // fetcher's start() schedules a Timer on main and we don't
+        // want to risk a re-entrancy deadlock on the serial queue.
+        if config.useRemoteConfig {
+            let fetcher = RemoteConfigFetcher(
+                config: config,
+                onApply: { [weak self] cfg in
+                    self?.applyRemoteConfig(cfg)
+                }
+            )
+            self.queue.sync { self.remoteConfigFetcher = fetcher }
+            fetcher.start()
         }
     }
 
@@ -698,6 +736,108 @@ final class ReplayCore {
     var isSnapshotPaused: Bool { snapshotPaused }
 
     // -----------------------------------------------------------------
+    //  Remote-config apply
+    // -----------------------------------------------------------------
+
+    /// Apply a fresh ``RemoteConfig`` to the running SDK. Called
+    /// from the fetcher on every successful fetch + once at cold
+    /// launch with the cached value (if any). Runs on main; safe
+    /// for UIKit-touching toggles. Idempotent — repeat applies of
+    /// the same config are no-ops at the toggle level because we
+    /// set rather than mutate every flag.
+    func applyRemoteConfig(_ cfg: RemoteConfig) {
+        ReplayLog.info(
+            "applyRemoteConfig: capture.network=\(cfg.captureNetwork) " +
+                "capture.console=\(cfg.captureConsole) " +
+                "sampling=\(cfg.samplingRate)"
+        )
+        queue.sync { self.remoteConfig = cfg }
+
+        // Console capture — start/stop dynamically. The capture
+        // installs print()/NSLog() interception; idempotent.
+        queue.sync {
+            if cfg.captureConsole {
+                if consoleCapture == nil {
+                    let console = ConsoleCapture { [weak self] event in
+                        guard let self = self else { return }
+                        self.queue.async {
+                            if let rt = self.runtime {
+                                self.pushLocked(rt: rt, type: "console", data: event)
+                            }
+                        }
+                    }
+                    console.start()
+                    self.consoleCapture = console
+                }
+            } else {
+                consoleCapture?.stop()
+                consoleCapture = nil
+            }
+        }
+
+        // Network capture flags — URLSessionCapture reads from
+        // statics on every URLProtocol decision. Flipping these
+        // takes effect on the next request.
+        if cfg.captureNetwork {
+            // emit may still be nil if the customer's baseline had
+            // captureNetwork=false — rewire it here so dashboard-
+            // flipped-on works correctly.
+            URLSessionCapture.emit = { [weak self] event in
+                self?.queue.async {
+                    if let rt = self?.runtime {
+                        self?.pushLocked(rt: rt, type: "network", data: event)
+                    }
+                }
+            }
+            URLSessionCapture.captureHeaders = cfg.captureNetworkHeaders
+            URLSessionCapture.maxBodyBytes = cfg.captureNetworkBodies ? 4_096 : 0
+            URLSessionCapture.install()
+        } else {
+            URLSessionCapture.emit = nil
+            URLSessionCapture.uninstall()
+        }
+
+        // Performance metrics — start/stop the manager. Stopping
+        // tears down the frame-link, memory poller, thermal +
+        // hang collectors cleanly.
+        if cfg.capturePerformance {
+            perfMetrics?.start()
+        } else {
+            perfMetrics?.stop()
+        }
+
+        // Privacy: maskAllInputs → occludeAllTextFields. The
+        // dashboard's workspace-level default ALWAYS wins over the
+        // customer's per-call occludeAllTextFields(false).
+        PrivacyRegistry.shared.occludeAllTextFields = cfg.privacyMaskAllInputs
+    }
+
+    /// Decide whether to sample IN the current session. Called once
+    /// at session_start. Uses a uniform [0,1) random draw against
+    /// the dashboard's samplingRate, with two override gates:
+    ///
+    ///   - `alwaysRecordIdentified`: a sender.identity.distinctId
+    ///     set before session_start forces sampling in.
+    ///   - `alwaysRecordErrors`: applied retroactively at push —
+    ///     a sampled-out session that fires an error unmutes for
+    ///     the rest of its lifetime.
+    ///
+    /// When sampled out, session_start + session_end still fire
+    /// (so the dashboard can count sampled-out sessions), but
+    /// every event in between drops at `pushLocked`.
+    func computeSamplingDecision() -> Bool {
+        guard let rc = remoteConfig else { return false }
+        if rc.samplingRate >= 1.0 { return false }
+        if rc.samplingRate <= 0.0 { return true }
+        if rc.samplingAlwaysRecordIdentified,
+           let did = sender?.identity?.distinctId,
+           !did.isEmpty {
+            return false
+        }
+        return Double.random(in: 0..<1) > rc.samplingRate
+    }
+
+    // -----------------------------------------------------------------
     //  cancelSession + dashboard deep-link helpers
     // -----------------------------------------------------------------
 
@@ -920,6 +1060,15 @@ final class ReplayCore {
         // re-registration is cheap if start() is called again.
         URLSessionCapture.emit = nil
         URLSessionCapture.uninstall()
+        // Stop the dashboard config fetcher's periodic poll so we
+        // don't leak a Timer after shutdown. Next start() recreates
+        // the fetcher with the new ReplayConfig.
+        let fetcher: RemoteConfigFetcher? = queue.sync {
+            let f = self.remoteConfigFetcher
+            self.remoteConfigFetcher = nil
+            return f
+        }
+        fetcher?.stop()
     }
 
     /// Bridge for the public `Replay.log(...)` entry point.
@@ -1077,6 +1226,17 @@ final class ReplayCore {
             appBuild: resolvedBuild
         )
         runtime = rt
+        // Sampling decision — one per session, computed against
+        // dashboard's samplingRate. Sampled-out sessions still emit
+        // session_start (so dashboard can count them) but every
+        // event in between drops at pushLocked.
+        sessionSampledOut = computeSamplingDecision()
+        if sessionSampledOut {
+            ReplayLog.info(
+                "session \(rt.sessionId) sampled out " +
+                    "(rate=\(remoteConfig?.samplingRate ?? 1))"
+            )
+        }
         // Reset the once-per-session thumbnail flag so the new
         // session's first snapshot fires a fresh upload (not
         // de-duped by the previous session's hash).
@@ -1127,6 +1287,21 @@ final class ReplayCore {
         // flowing so the dashboard still shows an interaction
         // record even with no pixel data.
         if type == "native_snapshot", OptOutStore.shared.schematicOptOut { return }
+        // Sampling drop. session_start + session_end ALWAYS go
+        // through so the dashboard's sampled-out count stays
+        // accurate; everything in between drops silently.
+        if sessionSampledOut, type != "session_start", type != "session_end" {
+            if let rc = remoteConfig,
+               rc.samplingAlwaysRecordErrors,
+               type == "error" {
+                ReplayLog.info(
+                    "sampled-out session unmuted by alwaysRecordErrors"
+                )
+                sessionSampledOut = false
+            } else {
+                return
+            }
+        }
         let now = SessionRuntime.nowMs()
         let event = ReplayEvent(
             id: rt.makeEventId(),
