@@ -60,6 +60,7 @@ public final class ReplayConfigBridge: NSObject {
     public var captureHeaders: Bool = false
     public var maxBodyBytes: Int = 4_096
     public var captureSnapshotPixels: Bool = true
+    public var snapshotInterval: TimeInterval = 0.5
     public var autoScreenName: Bool = true
 
     /// Minimal ObjC-callable init. ObjC consumers tweak optional
@@ -91,6 +92,7 @@ public final class ReplayConfigBridge: NSObject {
             captureHeaders: captureHeaders,
             maxBodyBytes: maxBodyBytes,
             captureSnapshotPixels: captureSnapshotPixels,
+            snapshotInterval: snapshotInterval,
             autoScreenName: autoScreenName
         )
     }

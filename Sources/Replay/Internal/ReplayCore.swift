@@ -156,6 +156,12 @@ final class ReplayCore {
             snapshot.sessionIdProvider = { [weak self] in
                 self?.queue.sync { self?.runtime?.sessionId }
             }
+            // UXCam-style continuous capture — ~2 FPS while in the
+            // foreground so playback feels like video instead of a
+            // gallery of stills. Stopped on background / pause /
+            // session stop, restarted on foreground.
+            snapshot.periodicInterval = config.snapshotInterval
+            snapshot.startPeriodic()
             self.snapshotCapture = snapshot
 
             // Native perf metrics — cold_start_ms, frame_drop_pct,
@@ -986,6 +992,12 @@ final class ReplayCore {
         // the session row's creation, the second snapshot will
         // catch up.
         snapshotCapture?.captureNow(trigger: "screen_appeared")
+        // Resume the UXCam-style continuous capture loop. Idempotent
+        // — startPeriodic cancels the previous timer first, so an
+        // accidental double-foreground (e.g. iOS handing us
+        // willEnterForeground + didBecomeActive close together)
+        // won't double-schedule.
+        snapshotCapture?.startPeriodic()
     }
 
     private func onAppBackgrounded() {
@@ -1026,6 +1038,10 @@ final class ReplayCore {
                 await self?.flushNow()
             }
         }
+        // Halt the continuous capture loop while the app is in the
+        // background — UIWindow drawHierarchy in the background
+        // captures a black frame on iOS and burns the main thread.
+        snapshotCapture?.stopPeriodic()
     }
 
     func stop() {
@@ -1044,6 +1060,10 @@ final class ReplayCore {
             flushTask = nil
             runtime = nil
         }
+        // Stop the continuous capture loop — leaving the
+        // DispatchSourceTimer scheduled would resurrect captures
+        // into a stopped runtime.
+        snapshotCapture?.stopPeriodic()
         // Stop background perf collectors — frame-link callback,
         // memory timer, thermal notification observer. Restarts on
         // next start() call.

@@ -93,6 +93,54 @@ final class SnapshotCapture {
     /// short-circuits at the pushLocked level).
     var enabled: Bool = true
 
+    /// UXCam-style periodic capture cadence (in seconds).
+    ///
+    /// UXCam reverse-engineered: their default capture rate is ~2 FPS
+    /// (every 0.5 s) during an active session. Without a continuous
+    /// loop, a session that doesn't change screens produces one
+    /// snapshot total and the player feels like a static image. With
+    /// it, the player gets a continuous-feeling timeline of frames
+    /// matching the user's perception of "video". Floor is clamped
+    /// to 0.2 s inside ``startPeriodic`` to keep the main thread
+    /// responsive.
+    var periodicInterval: TimeInterval = 0.5
+    private var periodicTimer: DispatchSourceTimer?
+    private let periodicLock = NSLock()
+
+    /// Start the continuous capture loop. Idempotent — re-starting
+    /// cancels the previous timer first. Called by ReplayCore when
+    /// a session starts (and again after foreground transitions).
+    func startPeriodic() {
+        periodicLock.withLock {
+            periodicTimer?.cancel()
+            let interval = max(periodicInterval, 0.2)
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
+            timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(50))
+            timer.setEventHandler { [weak self] in
+                guard let self = self, self.enabled else { return }
+                // Skip the dispatch hop if a more-recent trigger
+                // already fired — minInterval gates double-fires.
+                let recent: Bool = self.lastLock.withLock {
+                    guard let last = self._lastSnapshotAt else { return false }
+                    return Date().timeIntervalSince(last) < interval
+                }
+                if recent { return }
+                self.doCapture(trigger: "periodic")
+            }
+            periodicTimer = timer
+            timer.resume()
+        }
+    }
+
+    /// Stop the continuous capture loop. Called by ReplayCore on
+    /// session stop / pause / background. Idempotent.
+    func stopPeriodic() {
+        periodicLock.withLock {
+            periodicTimer?.cancel()
+            periodicTimer = nil
+        }
+    }
+
     func captureNow(trigger: String) {
         if !enabled { return }
         DispatchQueue.main.async { [weak self] in

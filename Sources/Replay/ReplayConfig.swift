@@ -53,6 +53,14 @@ public struct ReplayConfig {
     /// but visually plain. On → pixel-accurate via the asset endpoint.
     public let captureSnapshotPixels: Bool
 
+    /// Cadence of the continuous snapshot loop, in seconds.
+    ///
+    /// Matches UXCam's default ~2 FPS (0.5 s). Lower values mean
+    /// smoother playback at the cost of CPU + upload bandwidth.
+    /// Floor is clamped to 0.2 s inside
+    /// ``Replay/Internal/Capture/SnapshotCapture/startPeriodic()``.
+    public let snapshotInterval: TimeInterval
+
     /// Auto-detect screen names by swizzling
     /// `UIViewController.viewDidAppear`. When true (default),
     /// the current route is automatically the class name of the
@@ -93,6 +101,7 @@ public struct ReplayConfig {
         captureHeaders: Bool = false,
         maxBodyBytes: Int = 4_096,
         captureSnapshotPixels: Bool = true,
+        snapshotInterval: TimeInterval = 0.5,
         autoScreenName: Bool = true,
         useRemoteConfig: Bool = true
     ) {
@@ -109,6 +118,7 @@ public struct ReplayConfig {
         self.captureHeaders = captureHeaders
         self.maxBodyBytes = maxBodyBytes
         self.captureSnapshotPixels = captureSnapshotPixels
+        self.snapshotInterval = snapshotInterval
         self.autoScreenName = autoScreenName
         self.useRemoteConfig = useRemoteConfig
     }
