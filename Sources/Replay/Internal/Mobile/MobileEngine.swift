@@ -20,6 +20,18 @@ public final class MobileEngine {
     private(set) var startedAt: UInt64 = 0
     private var active = false
 
+    /// Messages emitted before the async `/start` round-trip completes
+    /// (the launch screen's viewComponent, or an `identify` / `track` /
+    /// `log` made at app launch) are queued here and drained into the
+    /// collector once the session token arrives. The reference tracker
+    /// buffers pre-start messages the same way — without this they'd be
+    /// dropped because `collector` is still nil. Bounded so a
+    /// never-completing `/start` can't grow it without limit.
+    private let preStartLock = NSLock()
+    private var preStart: [Data] = []
+    private var ready = false
+    private var starting = false
+
     /// Sensitive window-coordinate rects to mask in screenshots.
     /// Wired to the privacy registry by the host SDK.
     public var privacyRectsProvider: () -> [CGRect] = { [] }
@@ -27,11 +39,16 @@ public final class MobileEngine {
     private init() {}
 
     public func start(projectKey: String, host: String) {
+        // Idempotent: a second start() must not wire a second collector /
+        // screenshot timer / perf sampler onto the same singleton.
+        if starting { return }
+        starting = true
         let transport = MobileTransport(baseURL: host, projectKey: projectKey)
         self.transport = transport
 
         transport.start(params: MobileEngine.deviceParams(projectKey: projectKey)) { [weak self] resp in
-            guard let self = self, let resp = resp else { return }
+            guard let self = self else { return }
+            guard let resp = resp else { self.starting = false; return } // allow retry
             DispatchQueue.main.async {
                 self.sessionID = resp.sessionID
                 self.startedAt = nowMs()
@@ -66,51 +83,75 @@ public final class MobileEngine {
                     self?.sendCrash(name: name, reason: reason, stacktrace: stack)
                 }
                 self.registerLifecycle()
+
+                // Drain anything queued during the /start round-trip, then
+                // go live. Holding the lock across the flip keeps a
+                // concurrent enqueue() from racing past the drain.
+                self.preStartLock.lock()
+                for m in self.preStart { collector.add(m) }
+                self.preStart.removeAll()
+                self.ready = true
+                self.preStartLock.unlock()
+
                 self.active = true
             }
         }
     }
 
+    /// Hand a message to the collector if the session is live, otherwise
+    /// buffer it until start()'s drain runs. Bounded at 1000 to cap the
+    /// worst case where `/start` never returns.
+    private func enqueue(_ msg: Data) {
+        preStartLock.lock(); defer { preStartLock.unlock() }
+        if ready, let c = collector {
+            c.add(msg)
+        } else if preStart.count < 1000 {
+            preStart.append(msg)
+        }
+    }
+
     public func stop() {
         active = false
+        starting = false
         screenshots?.stop(); screenshots = nil
         collector?.stop(); collector = nil
         touch.uninstall()
         NotificationCenter.default.removeObserver(self)
         sessionID = nil
+        preStartLock.lock(); preStart.removeAll(); ready = false; preStartLock.unlock()
     }
 
     // ── Message API (called by listeners) ────────────────────────────
     func sendClick(label: String, x: UInt64, y: UInt64) {
-        collector?.add(MobileWire.click(label: label, x: x, y: y, timestamp: nowMs()))
+        enqueue(MobileWire.click(label: label, x: x, y: y, timestamp: nowMs()))
     }
     func sendSwipe(label: String, x: UInt64, y: UInt64, direction: String) {
-        collector?.add(MobileWire.swipe(label: label, x: x, y: y, direction: direction, timestamp: nowMs()))
+        enqueue(MobileWire.swipe(label: label, x: x, y: y, direction: direction, timestamp: nowMs()))
     }
     func sendInput(value: String, masked: Bool, label: String) {
-        collector?.add(MobileWire.input(value: value, masked: masked, label: label, timestamp: nowMs()))
+        enqueue(MobileWire.input(value: value, masked: masked, label: label, timestamp: nowMs()))
     }
     func sendPerformance(name: String, value: UInt64) {
-        collector?.add(MobileWire.performance(name: name, value: value, timestamp: nowMs()))
+        enqueue(MobileWire.performance(name: name, value: value, timestamp: nowMs()))
     }
     func sendLog(severity: String, content: String) {
-        collector?.add(MobileWire.log(severity: severity, content: content, timestamp: nowMs()))
+        enqueue(MobileWire.log(severity: severity, content: content, timestamp: nowMs()))
     }
     func sendNetwork(type: String, method: String, url: String, request: String, response: String, status: UInt64, duration: UInt64) {
-        collector?.add(MobileWire.networkCall(type: type, method: method, url: url, request: request, response: response, status: status, duration: duration, timestamp: nowMs()))
+        enqueue(MobileWire.networkCall(type: type, method: method, url: url, request: request, response: response, status: status, duration: duration, timestamp: nowMs()))
     }
     func sendCrash(name: String, reason: String, stacktrace: String) {
-        collector?.add(MobileWire.crash(name: name, reason: reason, stacktrace: stacktrace, timestamp: nowMs()))
+        enqueue(MobileWire.crash(name: name, reason: reason, stacktrace: stacktrace, timestamp: nowMs()))
         collector?.flush()
     }
     func sendScreen(screenName: String, viewName: String, visible: Bool) {
-        collector?.add(MobileWire.viewComponent(screenName: screenName, viewName: viewName, visible: visible, timestamp: nowMs()))
+        enqueue(MobileWire.viewComponent(screenName: screenName, viewName: viewName, visible: visible, timestamp: nowMs()))
     }
     public func sendEvent(name: String, payload: String) {
-        collector?.add(MobileWire.event(name: name, payload: payload, timestamp: nowMs()))
+        enqueue(MobileWire.event(name: name, payload: payload, timestamp: nowMs()))
     }
     public func setUserID(_ id: String) {
-        collector?.add(MobileWire.userID(id, timestamp: nowMs()))
+        enqueue(MobileWire.userID(id, timestamp: nowMs()))
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────

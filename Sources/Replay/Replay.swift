@@ -107,6 +107,11 @@ public enum Replay {
     /// auto-tagger (which uses `UIViewController` class names by default).
     public static func tagScreenName(_ name: String) {
         ReplayCore.shared.setRoute(name)
+        #if canImport(UIKit)
+        // Manual screen tag → viewComponent message, same as the
+        // UIViewController auto-tagger, so the Screens tab reflects it.
+        MobileEngine.shared.sendScreen(screenName: name, viewName: name, visible: true)
+        #endif
     }
 
     #if canImport(UIKit)
@@ -518,5 +523,9 @@ public enum Replay {
         stack: String? = nil
     ) {
         ReplayCore.shared.logExplicit(level: level, message: message, stack: stack)
+        #if canImport(UIKit)
+        // Bridge into the binary message stream → dashboard console tab.
+        MobileEngine.shared.sendLog(severity: level, content: stack != nil ? "\(message)\n\(stack!)" : message)
+        #endif
     }
 }

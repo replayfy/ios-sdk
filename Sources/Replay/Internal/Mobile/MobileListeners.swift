@@ -14,8 +14,8 @@ enum MobileScreenTracker {
         self.handler = handler
         guard !installed else { return }
         installed = true
-        swizzle(#selector(UIViewController.viewDidAppear(_:)), #selector(UIViewController.replay_viewDidAppear(_:)))
-        swizzle(#selector(UIViewController.viewDidDisappear(_:)), #selector(UIViewController.replay_viewDidDisappear(_:)))
+        swizzle(#selector(UIViewController.viewDidAppear(_:)), #selector(UIViewController.replay_mobileViewDidAppear(_:)))
+        swizzle(#selector(UIViewController.viewDidDisappear(_:)), #selector(UIViewController.replay_mobileViewDidDisappear(_:)))
     }
 
     static func report(_ vc: UIViewController, visible: Bool) {
@@ -30,12 +30,15 @@ enum MobileScreenTracker {
 }
 
 extension UIViewController {
-    @objc fileprivate func replay_viewDidAppear(_ animated: Bool) {
-        self.replay_viewDidAppear(animated)
+    // Distinct selector names from the legacy ScreenAutoDetector swizzle
+    // (which also trampolines through viewDidAppear). The two chain
+    // cleanly: viewDidAppear → this → the legacy hop → the original.
+    @objc fileprivate func replay_mobileViewDidAppear(_ animated: Bool) {
+        self.replay_mobileViewDidAppear(animated)
         MobileScreenTracker.report(self, visible: true)
     }
-    @objc fileprivate func replay_viewDidDisappear(_ animated: Bool) {
-        self.replay_viewDidDisappear(animated)
+    @objc fileprivate func replay_mobileViewDidDisappear(_ animated: Bool) {
+        self.replay_mobileViewDidDisappear(animated)
         MobileScreenTracker.report(self, visible: false)
     }
 }
