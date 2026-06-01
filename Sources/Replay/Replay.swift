@@ -34,7 +34,12 @@ public enum Replay {
     /// EARLY (before any other SDK code paths) so we don't miss
     /// initial state.
     public static func start(with config: ReplayConfig) {
-        ReplayCore.shared.start(config: config)
+        // Reference-parity mobile recording engine: periodic JPEG frames
+        // + binary message protocol → /v1/mobile/*. Replaces the legacy
+        // per-snapshot/asset engine (no backward compatibility).
+        #if canImport(UIKit)
+        MobileEngine.shared.start(projectKey: config.apiKey, host: config.apiHost)
+        #endif
     }
 
     /// Attach a known-user identity to the current session. Anonymous
@@ -50,7 +55,9 @@ public enum Replay {
         _ distinctId: String,
         properties: [String: Any]? = nil
     ) {
-        ReplayCore.shared.identify(distinctId: distinctId, properties: properties)
+        #if canImport(UIKit)
+        MobileEngine.shared.setUserID(distinctId)
+        #endif
     }
 
     /// Fire a custom event onto the timeline. Drives the "Event"
@@ -65,7 +72,15 @@ public enum Replay {
         _ name: String,
         properties: [String: Any]? = nil
     ) {
-        ReplayCore.shared.track(name: name, properties: properties)
+        #if canImport(UIKit)
+        var payload = ""
+        if let properties = properties,
+           let data = try? JSONSerialization.data(withJSONObject: properties),
+           let str = String(data: data, encoding: .utf8) {
+            payload = str
+        }
+        MobileEngine.shared.sendEvent(name: name, payload: payload)
+        #endif
     }
 
     /// Manually end the current session and force-upload the in-memory
