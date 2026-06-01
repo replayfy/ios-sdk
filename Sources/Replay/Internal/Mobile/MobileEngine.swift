@@ -14,6 +14,7 @@ public final class MobileEngine {
     private var collector: MobileCollector?
     private var screenshots: MobileScreenshots?
     private let touch = MobileTouchCapture()
+    private var perf: MobilePerfMonitor?
 
     private(set) var sessionID: String?
     private(set) var startedAt: UInt64 = 0
@@ -49,6 +50,20 @@ public final class MobileEngine {
                     } else {
                         self.sendClick(label: label, x: x, y: y)
                     }
+                }
+                // Screen tracking → viewComponent messages.
+                MobileScreenTracker.install { [weak self] screen, visible in
+                    self?.sendScreen(screenName: screen, viewName: screen, visible: visible)
+                }
+                // Performance metrics → performanceEvent messages.
+                let perf = MobilePerfMonitor { [weak self] name, value in
+                    self?.sendPerformance(name: name, value: value)
+                }
+                perf.start()
+                self.perf = perf
+                // Uncaught-exception crash reporting.
+                MobileCrashHandler.install { [weak self] name, reason, stack in
+                    self?.sendCrash(name: name, reason: reason, stacktrace: stack)
                 }
                 self.registerLifecycle()
                 self.active = true
