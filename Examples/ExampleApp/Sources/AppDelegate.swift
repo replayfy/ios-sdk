@@ -22,7 +22,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // network namespace. Port 4000 is the local ingest-api.
         Replay.start(
             with: ReplayConfig(
-                apiKey: "rpl_pk_97f6b1ce7235126b0cc017716e81fe12849e",
+                apiKey: "mobiletest123",
                 apiHost: "http://127.0.0.1:4000",
                 captureSnapshotPixels: true
             )
@@ -30,7 +30,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         NSLog("[ReplayExample] Replay.start dispatched — see ReplaySdk-tagged logs")
 
         let window = UIWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = MainViewController()
+        window.rootViewController = UINavigationController(rootViewController: MainViewController())
         window.makeKeyAndVisible()
         self.window = window
         return true
