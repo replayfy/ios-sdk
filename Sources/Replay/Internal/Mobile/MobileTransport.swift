@@ -9,6 +9,9 @@ struct MobileStartResponse: Decodable {
     let framesSupport: Bool
     let projectID: String
     let userUUID: String
+    // Dashboard-controlled capture toggles (optional → default true).
+    let captureConsole: Bool?
+    let captureNetwork: Bool?
 }
 
 /// HTTP transport for the mobile ingest endpoints.

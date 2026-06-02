@@ -69,6 +69,25 @@ final class MobileCollector {
             }
         }
     }
+
+    /// Synchronous flush — used by the crash handler so the crash reaches
+    /// the server before the process dies. Sends via the un-gzipped /late
+    /// path and blocks the caller (up to 3s) on a semaphore.
+    func flushBlocking() {
+        lock.lock()
+        guard !waiting.isEmpty else { lock.unlock(); return }
+        let batch = waiting
+        waiting.removeAll()
+        let startIndex = nextIndex
+        nextIndex += UInt64(batch.count)
+        lock.unlock()
+
+        var content = MobileWire.batchMeta(firstIndex: startIndex, timestamp: nowMs())
+        for m in batch { content.append(m) }
+        let sem = DispatchSemaphore(value: 0)
+        transport.sendLateMessages(content) { _ in sem.signal() }
+        _ = sem.wait(timeout: .now() + 3)
+    }
 }
 
 func nowMs() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }

@@ -20,6 +20,10 @@ public final class MobileEngine {
     private(set) var startedAt: UInt64 = 0
     private var active = false
 
+    // Dashboard-controlled capture toggles, set from the /start response.
+    private var captureConsole = true
+    private var captureNetwork = true
+
     /// Messages emitted before the async `/start` round-trip completes
     /// (the launch screen's viewComponent, or an `identify` / `track` /
     /// `log` made at app launch) are queued here and drained into the
@@ -52,6 +56,8 @@ public final class MobileEngine {
             DispatchQueue.main.async {
                 self.sessionID = resp.sessionID
                 self.startedAt = nowMs()
+                self.captureConsole = resp.captureConsole ?? true
+                self.captureNetwork = resp.captureNetwork ?? true
 
                 let collector = MobileCollector(transport: transport)
                 let screenshots = MobileScreenshots(transport: transport, privacyRects: { self.privacyRectsProvider() })
@@ -135,14 +141,17 @@ public final class MobileEngine {
         enqueue(MobileWire.performance(name: name, value: value, timestamp: nowMs()))
     }
     func sendLog(severity: String, content: String) {
+        guard captureConsole else { return }
         enqueue(MobileWire.log(severity: severity, content: content, timestamp: nowMs()))
     }
     func sendNetwork(type: String, method: String, url: String, request: String, response: String, status: UInt64, duration: UInt64) {
+        guard captureNetwork else { return }
         enqueue(MobileWire.networkCall(type: type, method: method, url: url, request: request, response: response, status: status, duration: duration, timestamp: nowMs()))
     }
     func sendCrash(name: String, reason: String, stacktrace: String) {
         enqueue(MobileWire.crash(name: name, reason: reason, stacktrace: stacktrace, timestamp: nowMs()))
-        collector?.flush()
+        // Synchronous — the process is about to die.
+        collector?.flushBlocking()
     }
     func sendScreen(screenName: String, viewName: String, visible: Bool) {
         enqueue(MobileWire.viewComponent(screenName: screenName, viewName: viewName, visible: visible, timestamp: nowMs()))
@@ -162,11 +171,14 @@ public final class MobileEngine {
     }
     @objc private func onBackground() {
         sendPerformance(name: "background", value: 1)
-        screenshots?.flush()
+        // Pause capture while backgrounded so we don't inflate the archive
+        // with invisible-window frames; pause() flushes what's pending.
+        screenshots?.pause()
         collector?.flush()
     }
     @objc private func onForeground() {
         sendPerformance(name: "background", value: 0)
+        screenshots?.resume()
     }
 
     // ── /start device params ─────────────────────────────────────────

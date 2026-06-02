@@ -51,6 +51,26 @@ final class MobileScreenshots {
         flush()
     }
 
+    /// Suspend capture while backgrounded — shooting an invisible window
+    /// just inflates the archive. Flushes what's pending.
+    func pause() {
+        DispatchQueue.main.async {
+            self.timer?.invalidate(); self.timer = nil
+            self.flush()
+        }
+    }
+
+    /// Resume capture on return to the foreground.
+    func resume() {
+        DispatchQueue.main.async {
+            guard self.timer == nil else { return }
+            self.capture()
+            self.timer = Timer.scheduledTimer(withTimeInterval: self.captureInterval, repeats: true) { [weak self] _ in
+                self?.capture()
+            }
+        }
+    }
+
     private func capture() {
         autoreleasepool {
             guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else { return }
