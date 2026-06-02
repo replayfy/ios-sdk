@@ -64,6 +64,7 @@ final class MobilePerfMonitor {
             nc.addObserver(self, selector: #selector(self.onNotify(_:)), name: UIDevice.batteryStateDidChangeNotification, object: nil)
             nc.addObserver(self, selector: #selector(self.onNotify(_:)), name: .NSProcessInfoPowerStateDidChange, object: nil)
             nc.addObserver(self, selector: #selector(self.onNotify(_:)), name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+            nc.addObserver(self, selector: #selector(self.onNotify(_:)), name: .NSBundleResourceRequestLowDiskSpace, object: nil)
             self.sampleCPU(); self.sampleMemory()
             self.cpuTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.sampleCPU() }
             self.memTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.sampleMemory() }
@@ -88,6 +89,8 @@ final class MobilePerfMonitor {
             emit("isLowPowerModeEnabled", ProcessInfo.processInfo.isLowPowerModeEnabled ? 1 : 0)
         case UIApplication.didReceiveMemoryWarningNotification:
             emit("memoryWarning", 0)
+        case .NSBundleResourceRequestLowDiskSpace:
+            emit("lowDiskSpace", 0)
         default: break
         }
     }
