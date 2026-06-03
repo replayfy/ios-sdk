@@ -35,7 +35,7 @@ import ObjectiveC.runtime
 final class ScreenAutoDetector {
 
     /// Called with the detected screen name (typically the VC's
-    /// class name). Wired by ReplayCore to ReplayCore.setRoute.
+    /// class name). Wired by LegacyCore to LegacyCore.setRoute.
     static var onScreenChange: ((String) -> Void)?
 
     /// Runtime kill switch for the auto-tagger. Default-true so the

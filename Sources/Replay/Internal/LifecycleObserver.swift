@@ -4,7 +4,7 @@ import UIKit
 #endif
 
 /// Listens to whole-app fore/background transitions via the
-/// `UIApplication` notifications and asks ``ReplayCore`` to rotate
+/// `UIApplication` notifications and asks ``LegacyCore`` to rotate
 /// sessions accordingly.
 ///
 /// Uses the application-level notifications (rather than UIScene)

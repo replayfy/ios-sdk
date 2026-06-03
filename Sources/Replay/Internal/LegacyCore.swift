@@ -22,9 +22,9 @@ import UIKit
 /// because the public API is sync from any thread — making methods
 /// `await`-able would force every call site to bridge through Task,
 /// which would surprise existing Obj-C codebases.
-final class ReplayCore {
+final class LegacyCore {
 
-    static let shared = ReplayCore()
+    static let shared = LegacyCore()
 
     private let queue = DispatchQueue(label: "com.replayfy.ios.core", qos: .userInitiated)
 
@@ -144,7 +144,7 @@ final class ReplayCore {
             // bitmap-asset + thumbnail upload was removed with the
             // /v1/replay/assets + /v1/replay/thumbnail endpoints; the
             // current SDK streams pixels over the binary /v1/mobile
-            // protocol via MobileEngine.)
+            // protocol via ReplayCore.)
             let snapshot = SnapshotCapture { [weak self] snap in
                 self?.emitSnapshot(snap)
             }
@@ -962,7 +962,7 @@ final class ReplayCore {
             sessionsThisProcess += 1
         }
         // Cold-start measurement — emit once per process. The
-        // measurement runs ReplayCore.init → first foreground,
+        // measurement runs LegacyCore.init → first foreground,
         // which approximates didFinishLaunching → first frame
         // visible to the user. Idempotent (returns nil after the
         // first call), so duplicate foregrounds don't re-emit.

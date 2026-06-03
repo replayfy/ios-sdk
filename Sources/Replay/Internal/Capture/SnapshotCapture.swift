@@ -4,7 +4,7 @@ import UIKit
 #endif
 
 /// Schedules + executes view-tree snapshots, emitting
-/// ``NativeSnapshotEventData`` payloads to ReplayCore.
+/// ``NativeSnapshotEventData`` payloads to LegacyCore.
 ///
 /// Trigger policies (from docs/native-snapshot-format.md):
 ///   • `screen_appeared` — `Replay.tagScreenName` + key-window
@@ -64,7 +64,7 @@ final class SnapshotCapture {
     /// hop yields back to the runloop, lets pending layout +
     /// CADisplayLink flushes complete, then the capture sees the
     /// rendered hierarchy.
-    /// Runtime gate that ReplayCore flips when the customer calls
+    /// Runtime gate that LegacyCore flips when the customer calls
     /// `pauseRecording()` / `Replay.optOutOfSchematicRecordings(true)`.
     /// Defaults to true (recording). When false: every entry point
     /// — captureNow, scheduleIdle, screen-resume callback — early-
@@ -88,7 +88,7 @@ final class SnapshotCapture {
     private let periodicLock = NSLock()
 
     /// Start the continuous capture loop. Idempotent — re-starting
-    /// cancels the previous timer first. Called by ReplayCore when
+    /// cancels the previous timer first. Called by LegacyCore when
     /// a session starts (and again after foreground transitions).
     func startPeriodic() {
         periodicLock.withLock {
@@ -112,7 +112,7 @@ final class SnapshotCapture {
         }
     }
 
-    /// Stop the continuous capture loop. Called by ReplayCore on
+    /// Stop the continuous capture loop. Called by LegacyCore on
     /// session stop / pause / background. Idempotent.
     func stopPeriodic() {
         periodicLock.withLock {
@@ -177,7 +177,7 @@ final class SnapshotCapture {
         // + hash + asset/thumbnail upload) was retired with the
         // /v1/replay/assets + /v1/replay/thumbnail endpoints; the
         // current SDK streams pixels over the binary /v1/mobile protocol
-        // via MobileEngine, not through this path.
+        // via ReplayCore, not through this path.
         emit(buildPayload(tree: tree, width: width, height: height, scale: scale, trigger: trigger))
         #endif
     }

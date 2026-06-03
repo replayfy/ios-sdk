@@ -43,7 +43,7 @@ import CrashReporter
 final class CrashHandler {
 
     /// Called on next-launch with the recovered crash record. Wires
-    /// up to ReplayCore which emits as an `error` event.
+    /// up to LegacyCore which emits as an `error` event.
     private let onRecoveredCrash: (CrashRecord) -> Void
 
     init(onRecoveredCrash: @escaping (CrashRecord) -> Void) {
@@ -193,7 +193,7 @@ final class CrashHandler {
     }
 }
 
-/// A crash record recovered on next launch — passed to ReplayCore
+/// A crash record recovered on next launch — passed to LegacyCore
 /// for emission as an `error` event with `kind:"crash"`.
 struct CrashRecord {
     /// "crash" (PLCrashReporter) or legacy "signal" / "nsexception".

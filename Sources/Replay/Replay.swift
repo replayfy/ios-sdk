@@ -38,7 +38,7 @@ public enum Replay {
         // + binary message protocol → /v1/mobile/*. Replaces the legacy
         // per-snapshot/asset engine (no backward compatibility).
         #if canImport(UIKit)
-        MobileEngine.shared.start(projectKey: config.apiKey, host: config.apiHost)
+        ReplayCore.shared.start(projectKey: config.apiKey, host: config.apiHost)
         #endif
     }
 
@@ -56,13 +56,13 @@ public enum Replay {
         properties: [String: Any]? = nil
     ) {
         #if canImport(UIKit)
-        MobileEngine.shared.setUserID(distinctId)
+        ReplayCore.shared.setUserID(distinctId)
         // Each trait rides as its own metadata(92) message — the backend
         // promotes plan/email/name to EndUser columns and keeps the rest as
         // custom properties, mirroring the web identify path.
         if let properties = properties {
             for (key, value) in properties {
-                MobileEngine.shared.sendMetadata(key: key, value: String(describing: value))
+                ReplayCore.shared.sendMetadata(key: key, value: String(describing: value))
             }
         }
         #endif
@@ -87,7 +87,7 @@ public enum Replay {
            let str = String(data: data, encoding: .utf8) {
             payload = str
         }
-        MobileEngine.shared.sendEvent(name: name, payload: payload)
+        ReplayCore.shared.sendEvent(name: name, payload: payload)
         #endif
     }
 
@@ -99,14 +99,14 @@ public enum Replay {
     /// or end-of-onboarding screens where you want the session to
     /// close immediately rather than at next backgrounding.
     public static func stop() {
-        ReplayCore.shared.stop()
+        LegacyCore.shared.stop()
     }
 
     /// Whether the SDK is currently recording. Returns false when
     /// `start(with:)` hasn't been called, when the user is opted
     /// out, or when a sampling decision dropped the current session.
     public static var isRecording: Bool {
-        ReplayCore.shared.isRecording
+        LegacyCore.shared.isRecording
     }
 
     // MARK: - Stubs (engine in follow-up commits)
@@ -114,11 +114,11 @@ public enum Replay {
     /// Tag the current screen with a name. Manual override for the
     /// auto-tagger (which uses `UIViewController` class names by default).
     public static func tagScreenName(_ name: String) {
-        ReplayCore.shared.setRoute(name)
+        LegacyCore.shared.setRoute(name)
         #if canImport(UIKit)
         // Manual screen tag → viewComponent message, same as the
         // UIViewController auto-tagger, so the Screens tab reflects it.
-        MobileEngine.shared.sendScreen(screenName: name, viewName: name, visible: true)
+        ReplayCore.shared.sendScreen(screenName: name, viewName: name, visible: true)
         #endif
     }
 
@@ -219,13 +219,13 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `pauseScreenRecording()`.
     public static func pauseRecording() {
-        ReplayCore.shared.setSnapshotPaused(true)
+        LegacyCore.shared.setSnapshotPaused(true)
     }
 
     /// Resume schematic capture after ``pauseRecording()``.
     /// Mirrors UXCam's `resumeScreenRecording()`.
     public static func resumeRecording() {
-        ReplayCore.shared.setSnapshotPaused(false)
+        LegacyCore.shared.setSnapshotPaused(false)
     }
 
     /// Discard the current session entirely — clears the in-memory
@@ -235,7 +235,7 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `cancelCurrentSession()`.
     public static func cancelSession() {
-        ReplayCore.shared.cancelCurrentSession()
+        LegacyCore.shared.cancelCurrentSession()
     }
 
     // -----------------------------------------------------------------
@@ -250,12 +250,12 @@ public enum Replay {
     /// Mirrors UXCam's `optOutOverall()` / `optInOverall()` —
     /// collapsed to one boolean for the idiomatic Swift shape.
     public static func optOutOverall(_ optOut: Bool) {
-        ReplayCore.shared.setOverallOptOut(optOut)
+        LegacyCore.shared.setOverallOptOut(optOut)
     }
 
     /// Whether the customer is currently opted out overall.
     public static var isOptedOutOverall: Bool {
-        ReplayCore.shared.isOverallOptedOut
+        LegacyCore.shared.isOverallOptedOut
     }
 
     /// Schematic (snapshot-only) opt-out. When set to true: pixel
@@ -265,12 +265,12 @@ public enum Replay {
     /// Mirrors UXCam's `optOutOfSchematicRecordings()` /
     /// `optIntoSchematicRecordings()`.
     public static func optOutOfSchematicRecordings(_ optOut: Bool) {
-        ReplayCore.shared.setSchematicOptOut(optOut)
+        LegacyCore.shared.setSchematicOptOut(optOut)
     }
 
     /// Whether schematic (snapshot) recording is currently opted out.
     public static var isOptedOutOfSchematicRecordings: Bool {
-        ReplayCore.shared.isSchematicOptedOut
+        LegacyCore.shared.isSchematicOptedOut
     }
 
     // -----------------------------------------------------------------
@@ -284,7 +284,7 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `urlForCurrentSession()`.
     public static func urlForCurrentSession() -> String? {
-        ReplayCore.shared.urlForCurrentSession
+        LegacyCore.shared.urlForCurrentSession
     }
 
     /// Dashboard URL for the currently-identified user (all
@@ -293,7 +293,7 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `urlForCurrentUser()`.
     public static func urlForCurrentUser() -> String? {
-        ReplayCore.shared.urlForCurrentUser
+        LegacyCore.shared.urlForCurrentUser
     }
 
     /// Attach a sticky property to the END USER (persists across
@@ -307,7 +307,7 @@ public enum Replay {
     /// Common use: `Replay.setUserProperty("plan", value: "pro")`
     /// or `Replay.setUserProperty("signupSource", value: "google_ads")`.
     public static func setUserProperty(_ key: String, value: Any?) {
-        ReplayCore.shared.setUserProperty(key, value: value)
+        LegacyCore.shared.setUserProperty(key, value: value)
     }
 
     /// Attach a sticky property to the CURRENT SESSION. Visible on
@@ -318,7 +318,7 @@ public enum Replay {
     /// `Replay.setSessionProperty("ab_variant", value: "B")`,
     /// `Replay.setSessionProperty("checkout_step", value: "shipping")`.
     public static func setSessionProperty(_ key: String, value: Any?) {
-        ReplayCore.shared.setSessionProperty(key, value: value)
+        LegacyCore.shared.setSessionProperty(key, value: value)
     }
 
     // -----------------------------------------------------------------
@@ -333,7 +333,7 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `setAutomaticScreenNameTagging(_:)`.
     public static func setAutomaticScreenNameTagging(_ enabled: Bool) {
-        ReplayCore.shared.setAutomaticScreenNameTagging(enabled)
+        LegacyCore.shared.setAutomaticScreenNameTagging(enabled)
     }
 
     /// Attach the device's push-notification token to the session.
@@ -346,7 +346,7 @@ public enum Replay {
         _ token: String,
         platform: String = "apns"
     ) {
-        ReplayCore.shared.setPushNotificationToken(token, platform: platform)
+        LegacyCore.shared.setPushNotificationToken(token, platform: platform)
     }
 
     /// Flag the current session as a favorite so it surfaces in the
@@ -355,7 +355,7 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `markSessionAsFavorite()`.
     public static func markSessionAsFavorite() {
-        ReplayCore.shared.markSessionAsFavorite()
+        LegacyCore.shared.markSessionAsFavorite()
     }
 
     /// Attach a SESSION-level tag (with optional properties) for
@@ -368,7 +368,7 @@ public enum Replay {
         _ name: String,
         properties: [String: Any]? = nil
     ) {
-        ReplayCore.shared.addTagWithProperties(name, properties: properties)
+        LegacyCore.shared.addTagWithProperties(name, properties: properties)
     }
 
     /// Force-end the current session + spin up a fresh one. Useful
@@ -379,7 +379,7 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `startNewSession()`.
     public static func startNewSession() {
-        ReplayCore.shared.startNewSession()
+        LegacyCore.shared.startNewSession()
     }
 
     /// Override the host app's marketing version + build that the
@@ -400,7 +400,7 @@ public enum Replay {
     /// dSYM for crash stacks. Pass nil to clear the override and
     /// fall back to Bundle.main.
     public static func setAppVersion(_ version: String?, build: String? = nil) {
-        ReplayCore.shared.setAppVersionOverride(version: version, build: build)
+        LegacyCore.shared.setAppVersionOverride(version: version, build: build)
     }
 
     /// Wire network capture for a custom `URLSessionConfiguration`.
@@ -436,7 +436,7 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `enableAdvancedGestureRecognizer(_:)`.
     public static func enableAdvancedGestureRecognizer(_ enabled: Bool) {
-        ReplayCore.shared.setAdvancedGesturesEnabled(enabled)
+        LegacyCore.shared.setAdvancedGesturesEnabled(enabled)
     }
 
     /// Allow brief backgrounding (≤ `windowSeconds`, default 30 s)
@@ -448,7 +448,7 @@ public enum Replay {
         _ allow: Bool,
         windowSeconds: TimeInterval = 30
     ) {
-        ReplayCore.shared.setAllowShortBreak(allow, windowSeconds: windowSeconds)
+        LegacyCore.shared.setAllowShortBreak(allow, windowSeconds: windowSeconds)
     }
 
     /// Toggle multi-session recording per app launch. When false,
@@ -457,7 +457,7 @@ public enum Replay {
     ///
     /// Mirrors UXCam's `setMultiSessionRecord(_:)`.
     public static func setMultiSessionRecord(_ enabled: Bool) {
-        ReplayCore.shared.setMultiSessionRecord(enabled)
+        LegacyCore.shared.setMultiSessionRecord(enabled)
     }
 
     /// Register a callback that fires after the SDK's first
@@ -474,12 +474,12 @@ public enum Replay {
     /// UXCam's `addVerificationListener(VerificationListener)`.
     @discardableResult
     public static func addVerificationListener(_ listener: @escaping () -> Void) -> UUID {
-        return ReplayCore.shared.addVerificationListener(listener)
+        return LegacyCore.shared.addVerificationListener(listener)
     }
 
     /// Drop a previously-added verification listener.
     public static func removeVerificationListener(_ token: UUID) {
-        ReplayCore.shared.removeVerificationListener(token)
+        LegacyCore.shared.removeVerificationListener(token)
     }
 
     /// Manual bug-report event. Wire to a "Send Feedback" /
@@ -494,7 +494,7 @@ public enum Replay {
         description: String? = nil,
         properties: [String: Any]? = nil
     ) {
-        ReplayCore.shared.reportBugEvent(
+        LegacyCore.shared.reportBugEvent(
             name: name,
             description: description,
             properties: properties
@@ -510,7 +510,7 @@ public enum Replay {
     /// Mirrors UXCam's `stopApplicationAndUploadData()`. Default
     /// timeout 5s.
     public static func stopApplicationAndUploadData(timeoutSeconds: TimeInterval = 5) {
-        ReplayCore.shared.stopApplicationAndUploadData(timeoutSeconds: timeoutSeconds)
+        LegacyCore.shared.stopApplicationAndUploadData(timeoutSeconds: timeoutSeconds)
     }
 
     /// Bridge customer-side logging into the SDK's console-event
@@ -530,10 +530,10 @@ public enum Replay {
         message: String,
         stack: String? = nil
     ) {
-        ReplayCore.shared.logExplicit(level: level, message: message, stack: stack)
+        LegacyCore.shared.logExplicit(level: level, message: message, stack: stack)
         #if canImport(UIKit)
         // Bridge into the binary message stream → dashboard console tab.
-        MobileEngine.shared.sendLog(severity: level, content: stack != nil ? "\(message)\n\(stack!)" : message)
+        ReplayCore.shared.sendLog(severity: level, content: stack != nil ? "\(message)\n\(stack!)" : message)
         #endif
     }
 }

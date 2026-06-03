@@ -147,7 +147,7 @@ symmetric:
 |---|---|---|
 | Public API | `Replay.swift` (`enum`) | `Replay.kt` (`object`) |
 | Config | `ReplayConfig.swift` (`struct`) | `ReplayConfig.kt` (data class) |
-| Orchestrator | `Internal/ReplayCore.swift` | `internal/ReplayCore.kt` |
+| Orchestrator | `Internal/LegacyCore.swift` | `internal/LegacyCore.kt` |
 | Session state | `Internal/SessionRuntime.swift` | `internal/SessionRuntime.kt` |
 | Lifecycle | `Internal/LifecycleObserver.swift` (UIApplication notifications) | `internal/SessionLifecycleObserver.kt` (ProcessLifecycleOwner) |
 | Transport | `Internal/BatchSender.swift` (URLSession) | `internal/BatchSender.kt` (OkHttp) |

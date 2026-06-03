@@ -21,7 +21,7 @@ import Foundation
 /// out, matching UXCam's semantics + most analytics SDKs.
 ///
 /// Mirrors UXCam's `optOutOverall(bool)` + `optOutOfSchematicRecordings(bool)`
-/// APIs. Read by ``ReplayCore`` at the top of every emit / capture
+/// APIs. Read by ``LegacyCore`` at the top of every emit / capture
 /// path so flips take effect on the next event without waiting for
 /// a process restart.
 ///

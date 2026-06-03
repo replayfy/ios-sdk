@@ -5,7 +5,7 @@ import Foundation
 /// True process-start time would come from `sysctl(kinfo_proc)`
 /// reading `kp_proc.p_starttime`. That's tricky to get right across
 /// arch/iOS versions, so we approximate with the moment
-/// ``ReplayCore.start`` was called — almost always milliseconds
+/// ``LegacyCore.start`` was called — almost always milliseconds
 /// after didFinishLaunching, which itself is milliseconds after
 /// dyld finishes. The over-approximation is bounded and consistent.
 ///

@@ -49,7 +49,7 @@ import MetricKit
 @available(iOS 14.0, *)
 final class MetricKitHangSubscriber: NSObject, MXMetricManagerSubscriber {
 
-    /// Emitter — wired by ``ReplayCore`` to push a `perf` event
+    /// Emitter — wired by ``LegacyCore`` to push a `perf` event
     /// with the captured stack as `details`. Pre-runtime buffered
     /// hangs (delivered before start() ran) are dropped; MetricKit
     /// re-delivers on next launch so we'll see them then.

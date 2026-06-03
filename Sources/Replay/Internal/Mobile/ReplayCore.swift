@@ -7,8 +7,8 @@ import UIKit
 /// Listeners (touch, input, screen, perf, log, crash, network) call the
 /// `send*` methods, which encode a binary message and hand it to the
 /// collector. Screenshots flow independently to /v1/mobile/images.
-public final class MobileEngine {
-    public static let shared = MobileEngine()
+public final class ReplayCore {
+    public static let shared = ReplayCore()
 
     private var transport: MobileTransport?
     private var collector: MobileCollector?
@@ -64,7 +64,7 @@ public final class MobileEngine {
         let transport = MobileTransport(baseURL: host, projectKey: projectKey)
         self.transport = transport
 
-        transport.start(params: MobileEngine.deviceParams(projectKey: projectKey, distinctID: distinctId)) { [weak self] resp in
+        transport.start(params: ReplayCore.deviceParams(projectKey: projectKey, distinctID: distinctId)) { [weak self] resp in
             guard let self = self else { return }
             guard let resp = resp else { self.starting = false; return } // allow retry
             // Server sampling gate dropped this launch — don't record. Leave
@@ -230,13 +230,13 @@ public final class MobileEngine {
             "platform": "ios",
             "trackerVersion": "2.0.0",
             "revID": (info?["CFBundleVersion"] as? String) ?? "N/A",
-            "userUUID": MobileEngine.persistentUUID(),
+            "userUUID": ReplayCore.persistentUUID(),
             "userOSVersion": UIDevice.current.systemVersion,
-            "userDevice": MobileEngine.deviceModel(),
+            "userDevice": ReplayCore.deviceModel(),
             "userDeviceType": UIDevice.current.model,
             "timestamp": nowMs(),
             "deviceMemory": UInt64(ProcessInfo.processInfo.physicalMemory / 1024),
-            "timezone": MobileEngine.timezone(),
+            "timezone": ReplayCore.timezone(),
             "width": Int(screen.width),
             "height": Int(screen.height),
         ]

@@ -4,7 +4,7 @@ import UIKit
 @testable import Replay
 
 /// Verifies the mobile frames screenshotter actually masks sensitive
-/// regions. The bug this guards against: `MobileEngine.privacyRectsProvider`
+/// regions. The bug this guards against: `ReplayCore.privacyRectsProvider`
 /// was never wired, so `windowPrivacyBounds()` (the seam the screenshotter
 /// masks against) returned nothing and the JPEGs shipped unmasked.
 ///

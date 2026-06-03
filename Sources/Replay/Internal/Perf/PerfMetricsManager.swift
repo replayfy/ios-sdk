@@ -9,7 +9,7 @@ import Foundation
 ///
 /// Each collector calls our `emitMetric` closure with
 /// `(metric, value, unit, rating?)`. We wrap into the standard
-/// ``PerformanceEventData`` shape and forward to ReplayCore for
+/// ``PerformanceEventData`` shape and forward to LegacyCore for
 /// inclusion in the next batch.
 ///
 /// Deferred until follow-up commits:
@@ -97,7 +97,7 @@ final class PerfMetricsManager {
         #endif
     }
 
-    /// Start every collector. Called from ``ReplayCore/start``
+    /// Start every collector. Called from ``LegacyCore/start``
     /// after the session runtime is set up.
     func start() {
         frames.start()
@@ -132,7 +132,7 @@ final class PerfMetricsManager {
             self.metricKitHang = sub
         }
         #endif
-        // Cold start fires once on first foreground; ReplayCore
+        // Cold start fires once on first foreground; LegacyCore
         // calls reportFirstForeground from its lifecycle hook so
         // we measure cold-launch → user-sees-app time, not just
         // dyld → didFinishLaunching.
