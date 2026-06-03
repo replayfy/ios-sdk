@@ -22,7 +22,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // network namespace. Port 4000 is the local ingest-api.
         Replay.start(
             with: ReplayConfig(
-                apiKey: "mobiletest123",
+                apiKey: "rpl_pk_ef7e2fc8c7f952bcd0a69466e1a42a0625f9",
                 apiHost: "http://127.0.0.1:4000",
                 captureSnapshotPixels: true
             )

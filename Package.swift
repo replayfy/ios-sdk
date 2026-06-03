@@ -46,12 +46,20 @@ let package = Package(
             url: "https://github.com/microsoft/plcrashreporter.git",
             from: "1.12.0"
         ),
+        // socket.io-client-swift — backs the live-presence channel
+        // (MobilePresence), the iOS counterpart of the web SDK's
+        // presence socket. Pure Swift, supports iOS 15+.
+        .package(
+            url: "https://github.com/socketio/socket.io-client-swift.git",
+            from: "16.1.0"
+        ),
     ],
     targets: [
         .target(
             name: "Replay",
             dependencies: [
                 .product(name: "CrashReporter", package: "plcrashreporter"),
+                .product(name: "SocketIO", package: "socket.io-client-swift"),
             ],
             path: "Sources/Replay"
         ),
@@ -64,10 +72,15 @@ let package = Package(
             dependencies: ["Replay"],
             path: "Sources/ReplaySwiftUI"
         ),
-        // XCTest target deferred until Xcode is installed — the
-        // CLT-only Swift toolchain doesn't ship XCTest, so
-        // `swift test` fails at module-resolution time. Re-add a
-        // `.testTarget(name: "ReplayTests", …)` once Xcode is on
-        // the dev box.
+        // XCTest target. `swift test` still fails under the CLT-only
+        // toolchain (no XCTest), so these run via
+        // `xcodebuild test -scheme Replay -destination 'platform=iOS Simulator,…'`
+        // where the full Xcode toolchain provides XCTest + a UIKit
+        // simulator host.
+        .testTarget(
+            name: "ReplayTests",
+            dependencies: ["Replay"],
+            path: "Tests/ReplayTests"
+        ),
     ]
 )

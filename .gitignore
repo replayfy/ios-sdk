@@ -18,3 +18,4 @@ DerivedData/
 
 # e2e test xcodebuild output
 .e2e-derived/
+.test-artifacts/

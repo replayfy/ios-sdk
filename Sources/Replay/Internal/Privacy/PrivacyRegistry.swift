@@ -199,16 +199,16 @@ final class PrivacyRegistry {
 
     /// Walk [root]'s view tree and return frames (in root coords) of
     /// every UIView whose class matches a currently-enabled bulk-
-    /// privacy flag. Used by BitmapCapture to paint stripe overlays
+    /// privacy flag, a registered occluded class, OR is a secure text
+    /// entry field. Used by BitmapCapture to paint stripe overlays
     /// over the matching regions in the captured PNG.
     ///
-    /// Empty when neither bulk flag is set → zero overhead for
-    /// customers not using bulk privacy.
+    /// Always walks — secure fields (``UITextField/isSecureTextEntry``)
+    /// are masked unconditionally (see [walkBulk]), so we can't early-
+    /// return even when no bulk flag / class is set.
     func bulkBounds(within root: UIView) -> [CGRect] {
         let wantFields = occludeAllTextFields
         let wantLabels = occludeAllTextViews
-        let hasClassFilter = !occludedClasses.isEmpty
-        guard wantFields || wantLabels || hasClassFilter else { return [] }
         var out: [CGRect] = []
         walkBulk(root, root: root, wantFields: wantFields, wantLabels: wantLabels, out: &out)
         return out
@@ -229,7 +229,11 @@ final class PrivacyRegistry {
                       // Per-class occlusion (applyOcclusion). Cheap
                       // when no classes registered (empty-set early-
                       // out lives inside matchesOccludedClass).
-                      matchesOccludedClass(view)
+                      matchesOccludedClass(view) ||
+                      // Secure text entry is ALWAYS masked, regardless of
+                      // any flag — the reference masks iOS secure fields by
+                      // default, and our web SDK forces password masking on.
+                      ((view as? UITextField)?.isSecureTextEntry == true)
         if matches {
             out.append(view.convert(view.bounds, to: root))
             // Don't recurse — text widgets don't contain other
@@ -291,6 +295,34 @@ final class PrivacyRegistry {
             }
             return rects
         }
+    }
+
+    /// Resolve the full set of sensitive rects for the current key
+    /// window, in window coordinates. This is the seam the mobile
+    /// frames screenshotter masks against — it walks the live view
+    /// tree and merges every privacy source:
+    ///
+    ///   - explicitly-marked views + their descendants (``sensitiveBounds``)
+    ///   - bulk class matches (occludeAll* / applyOcclusion) AND every
+    ///     secure text-entry field, always (``bulkBounds``)
+    ///   - one-shot bridge rects (React Native / Flutter)
+    ///
+    /// `occludeSensitiveScreen` short-circuits to a single window-sized
+    /// rect so no pixel survives. Must be called on the main thread
+    /// (it touches UIKit) — the screenshotter's capture runs there.
+    func windowPrivacyBounds() -> [CGRect] {
+        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow })
+            ?? UIApplication.shared.windows.first
+        else { return [] }
+        if occludeAllScreen {
+            // Drain pending bridge rects even on the full-screen path so
+            // they don't carry into a later non-full-screen frame.
+            _ = consumePendingFrameRects()
+            return [window.bounds]
+        }
+        return sensitiveBounds(within: window) +
+               bulkBounds(within: window) +
+               consumePendingFrameRects()
     }
 
     /// Wipe the registry. Used on opt-out / SDK stop.

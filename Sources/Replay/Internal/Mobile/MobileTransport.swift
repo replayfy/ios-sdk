@@ -12,6 +12,9 @@ struct MobileStartResponse: Decodable {
     // Dashboard-controlled capture toggles (optional → default true).
     let captureConsole: Bool?
     let captureNetwork: Bool?
+    // false ⇒ the server's sampling gate dropped this launch; the SDK must
+    // not record. Optional → default true for older servers.
+    let record: Bool?
 }
 
 /// HTTP transport for the mobile ingest endpoints.

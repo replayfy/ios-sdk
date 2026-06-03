@@ -15,10 +15,22 @@ public final class MobileEngine {
     private var screenshots: MobileScreenshots?
     private let touch = MobileTouchCapture()
     private var perf: MobilePerfMonitor?
+    // Live-presence socket (mirrors the web SDK's presence.ts): keeps this
+    // session on the dashboard's online list for its lifetime; the backend
+    // LiveGateway flips the EndUser online on connect / offline ~10s after
+    // disconnect. Best-effort — never blocks capture.
+    private var presence: MobilePresence?
 
     private(set) var sessionID: String?
     private(set) var startedAt: UInt64 = 0
     private var active = false
+    // Project key + ingest host kept so the presence socket authenticates
+    // with the same credentials as the HTTP transport.
+    private var projectKey: String?
+    private var host: String?
+    // Last identified distinct id (identify → setUserID). Passed to the
+    // presence socket so the dashboard attaches the session to the right user.
+    private var distinctId: String?
 
     // Dashboard-controlled capture toggles, set from the /start response.
     private var captureConsole = true
@@ -47,17 +59,39 @@ public final class MobileEngine {
         // screenshot timer / perf sampler onto the same singleton.
         if starting { return }
         starting = true
+        self.projectKey = projectKey
+        self.host = host
         let transport = MobileTransport(baseURL: host, projectKey: projectKey)
         self.transport = transport
 
-        transport.start(params: MobileEngine.deviceParams(projectKey: projectKey)) { [weak self] resp in
+        transport.start(params: MobileEngine.deviceParams(projectKey: projectKey, distinctID: distinctId)) { [weak self] resp in
             guard let self = self else { return }
             guard let resp = resp else { self.starting = false; return } // allow retry
+            // Server sampling gate dropped this launch — don't record. Leave
+            // `starting` true so we don't re-roll on a spurious re-init.
+            if resp.record == false { return }
             DispatchQueue.main.async {
                 self.sessionID = resp.sessionID
                 self.startedAt = nowMs()
                 self.captureConsole = resp.captureConsole ?? true
                 self.captureNetwork = resp.captureNetwork ?? true
+
+                // Open the live-presence socket now we have a session id. Uses
+                // the distinct id known so far (identify() before /start
+                // completed sets it); identify() afterwards calls
+                // updateDistinctId.
+                let presence = MobilePresence()
+                presence.start(host: host, projectKey: projectKey, sessionID: resp.sessionID, distinctID: self.distinctId)
+                self.presence = presence
+
+                // Wire screenshot privacy masking to the PrivacyRegistry — the
+                // same source the legacy capture path consults. Without this
+                // the frames screenshotter masks nothing: addPrivacyView,
+                // occludeAll*, applyOcclusion, occludeSensitiveScreen and
+                // secure text fields all register correctly but never reach
+                // the JPEGs. Resolved once per frame on the capture (main)
+                // thread, so the UIKit view-tree walk is safe.
+                self.privacyRectsProvider = { PrivacyRegistry.shared.windowPrivacyBounds() }
 
                 let collector = MobileCollector(transport: transport)
                 let screenshots = MobileScreenshots(transport: transport, privacyRects: { self.privacyRectsProvider() })
@@ -121,6 +155,7 @@ public final class MobileEngine {
         starting = false
         screenshots?.stop(); screenshots = nil
         collector?.stop(); collector = nil
+        presence?.stop(); presence = nil
         touch.uninstall()
         NotificationCenter.default.removeObserver(self)
         sessionID = nil
@@ -160,7 +195,12 @@ public final class MobileEngine {
         enqueue(MobileWire.event(name: name, payload: payload, timestamp: nowMs()))
     }
     public func setUserID(_ id: String) {
+        distinctId = id
+        presence?.updateDistinctID(id)
         enqueue(MobileWire.userID(id, timestamp: nowMs()))
+    }
+    public func sendMetadata(key: String, value: String) {
+        enqueue(MobileWire.metadata(key: key, value: value, timestamp: nowMs()))
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────
@@ -182,10 +222,10 @@ public final class MobileEngine {
     }
 
     // ── /start device params ─────────────────────────────────────────
-    private static func deviceParams(projectKey: String) -> [String: Any] {
+    private static func deviceParams(projectKey: String, distinctID: String?) -> [String: Any] {
         let screen = UIScreen.main.bounds
         let info = Bundle.main.infoDictionary
-        return [
+        var params: [String: Any] = [
             "projectKey": projectKey,
             "platform": "ios",
             "trackerVersion": "2.0.0",
@@ -200,6 +240,10 @@ public final class MobileEngine {
             "width": Int(screen.width),
             "height": Int(screen.height),
         ]
+        // If identify() ran before start, send the id so the sampling gate can
+        // honour alwaysRecordIdentified.
+        if let d = distinctID, !d.isEmpty { params["distinctId"] = d }
+        return params
     }
 
     private static func persistentUUID() -> String {

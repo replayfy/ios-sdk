@@ -57,6 +57,14 @@ public enum Replay {
     ) {
         #if canImport(UIKit)
         MobileEngine.shared.setUserID(distinctId)
+        // Each trait rides as its own metadata(92) message — the backend
+        // promotes plan/email/name to EndUser columns and keeps the rest as
+        // custom properties, mirroring the web identify path.
+        if let properties = properties {
+            for (key, value) in properties {
+                MobileEngine.shared.sendMetadata(key: key, value: String(describing: value))
+            }
+        }
         #endif
     }
 
