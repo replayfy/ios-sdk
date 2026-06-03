@@ -30,26 +30,6 @@ final class SnapshotCapture {
 
     private let emit: (NativeSnapshotEventData) -> Void
 
-    /// Wired by ``ReplayCore/start`` once config arrives. Nil → snapshot
-    /// ships tree-only (no `root.imageRef`); player falls back to
-    /// wireframe rendering.
-    var assetUploader: AssetUploader?
-
-    /// Posts the first bitmap of each session as the dashboard
-    /// Recordings-list thumbnail. Reset by ReplayCore on each new
-    /// session.
-    var thumbnailUploader: ThumbnailUploader?
-
-    /// Provides the current session's publicId — needed by the
-    /// thumbnail endpoint. Snapshot-time lookup so we always use
-    /// the live id (background→foreground rotation would otherwise
-    /// stamp the previous session).
-    var sessionIdProvider: (() -> String?)?
-
-    /// Reflects `ReplayConfig.captureSnapshotPixels`. False until
-    /// config lands or remote config flips it off.
-    var captureBitmaps: Bool = false
-
     /// Generation counter — incremented on every trigger. Pending
     /// debounced captures bail out if generation has advanced past
     /// their scheduled gen.
@@ -191,85 +171,32 @@ final class SnapshotCapture {
         let width = Int(window.bounds.width * scale)
         let height = Int(window.bounds.height * scale)
 
-        // Bitmap capture is synchronous + must be on main thread —
-        // do it BEFORE handing off to the background async so the
-        // captured tree + pixels are from the SAME frame. A fast
-        // scroll between tree-walk and bitmap would otherwise yield
-        // misaligned nodes.
-        let bitmap: UIImage? = captureBitmaps ? BitmapCapture.capture(window) : nil
-
         lastLock.withLock { _lastSnapshotAt = now }
 
-        // No bitmap (capture disabled or failed) → emit immediately
-        // with tree-only. Player falls back to wireframe rendering.
-        guard let bitmap else {
-            emit(buildPayload(tree: tree, width: width, height: height, scale: scale, trigger: trigger, imageRef: nil))
-            return
-        }
-
-        // Hand off to a background Task for PNG encode + SHA-256 +
-        // upload + thumbnail. The async work doesn't block the UI;
-        // the snapshot event is emitted once the asset upload's URL
-        // comes back (or immediately with imageRef=nil on failure).
-        let uploader = assetUploader
-        let thumbUploader = thumbnailUploader
-        let sessionId = sessionIdProvider?()
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-
-            // Fire-and-forget thumbnail upload — once per session.
-            // Runs in parallel with the asset upload below; uses a
-            // separate copy of the UIImage (it gets downsized +
-            // re-encoded as JPEG internally).
-            if let thumb = thumbUploader, let sid = sessionId {
-                await thumb.sendIfFirst(image: bitmap, sessionPublicId: sid)
-            }
-
-            guard let asset = BitmapCapture.encodeAndHash(bitmap) else {
-                self.emit(self.buildPayload(tree: tree, width: width, height: height, scale: scale, trigger: trigger, imageRef: nil))
-                return
-            }
-            let imageRef: String? = await uploader?.uploadOrCached(asset)
-            self.emit(self.buildPayload(tree: tree, width: width, height: height, scale: scale, trigger: trigger, imageRef: imageRef))
-        }
+        // Tree-only emit. The legacy full-screen-bitmap branch (encode
+        // + hash + asset/thumbnail upload) was retired with the
+        // /v1/replay/assets + /v1/replay/thumbnail endpoints; the
+        // current SDK streams pixels over the binary /v1/mobile protocol
+        // via MobileEngine, not through this path.
+        emit(buildPayload(tree: tree, width: width, height: height, scale: scale, trigger: trigger))
         #endif
     }
 
-    /// Stitch the bitmap URL into the root node + assemble the
-    /// event payload. The root's `imageRef` lets the player render
-    /// a pixel-accurate background; nested image nodes (per-leaf
-    /// UIImageView captures) come in a follow-up commit.
+    /// Assemble the view-tree snapshot event payload.
     private func buildPayload(
         tree: NativeViewNode,
         width: Int,
         height: Int,
         scale: CGFloat,
-        trigger: String,
-        imageRef: String?
+        trigger: String
     ) -> NativeSnapshotEventData {
-        let rootWithImage: NativeViewNode = imageRef.map { ref in
-            NativeViewNode(
-                id: tree.id,
-                type: tree.type,
-                className: tree.className,
-                bounds: tree.bounds,
-                text: tree.text,
-                imageRef: ref,
-                backgroundColor: tree.backgroundColor,
-                opacity: tree.opacity,
-                occluded: tree.occluded,
-                ariaLabel: tree.ariaLabel,
-                children: tree.children
-            )
-        } ?? tree
-
         return NativeSnapshotEventData(
             recorder: "native",
             width: width,
             height: height,
             pixelRatio: Double(scale),
             trigger: trigger,
-            root: rootWithImage
+            root: tree
         )
     }
 

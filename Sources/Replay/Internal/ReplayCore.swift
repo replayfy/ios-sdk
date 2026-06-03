@@ -140,21 +140,13 @@ final class ReplayCore {
             tracker.attach()
             self.tapTracker = tracker
 
-            // Snapshot pipeline. Bitmap capture + asset upload are
-            // wired now that we have an apiKey / apiHost. captureBitmaps
-            // defaults to config.captureSnapshotPixels (true unless
-            // disabled by customer or future remote config).
+            // Snapshot pipeline — emits tree-only snapshots. (Legacy
+            // bitmap-asset + thumbnail upload was removed with the
+            // /v1/replay/assets + /v1/replay/thumbnail endpoints; the
+            // current SDK streams pixels over the binary /v1/mobile
+            // protocol via MobileEngine.)
             let snapshot = SnapshotCapture { [weak self] snap in
                 self?.emitSnapshot(snap)
-            }
-            snapshot.assetUploader = AssetUploader(config: config)
-            snapshot.thumbnailUploader = ThumbnailUploader(config: config)
-            snapshot.captureBitmaps = config.captureSnapshotPixels
-            // Provide current sessionId at snapshot time — ensures
-            // the thumbnail upload targets the live session even
-            // after background→foreground rotations.
-            snapshot.sessionIdProvider = { [weak self] in
-                self?.queue.sync { self?.runtime?.sessionId }
             }
             // UXCam-style continuous capture — ~2 FPS while in the
             // foreground so playback feels like video instead of a
@@ -1295,10 +1287,6 @@ final class ReplayCore {
                     "(rate=\(remoteConfig?.samplingRate ?? 1))"
             )
         }
-        // Reset the once-per-session thumbnail flag so the new
-        // session's first snapshot fires a fresh upload (not
-        // de-duped by the previous session's hash).
-        snapshotCapture?.thumbnailUploader?.reset()
         // Reset the per-session screen-dedup memo so the first
         // setRoute call after a new session ships even if the
         // route happens to match the last session's last screen.

@@ -177,12 +177,11 @@ enum BitmapCapture {
     #endif
 
     /// Output of `encodeAndHash` — wire-ready bytes + content-addressed
-    /// hash + MIME for the asset upload endpoint.
+    /// hash + MIME for an encoded screenshot.
     ///
     /// Declared OUTSIDE the UIKit guard because it carries no
-    /// UIKit-dependent types — Data + String. The AssetUploader
-    /// references it from non-UIKit-guarded code so it must compile
-    /// on the macOS validation build too.
+    /// UIKit-dependent types — Data + String — so it must compile on
+    /// the macOS validation build too.
     struct EncodedAsset {
         let bytes: Data
         let hash: String
