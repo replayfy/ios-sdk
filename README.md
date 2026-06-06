@@ -1,161 +1,173 @@
 # Replay iOS SDK
 
-Session replay + analytics for iOS apps. Swift Package Manager.
+Session replay + analytics for iOS. Captures screen recordings, taps &
+gestures, screen navigation, network, console logs, crashes, and
+performance vitals, and streams them to your Replayfy dashboard.
 
-## Status
+- **Platforms:** iOS 15+
+- **Distribution:** Swift Package Manager · CocoaPods (`pod 'Replay'`)
 
-**Foundation only — not production-ready.** Public API is in place
-but the recording engine ships in follow-up commits, mirroring the
-Android SDK's incremental rollout:
+## Install
 
-- ✅ Public API surface (`Replay.start` / `identify` / `track` / `stop` / `isRecording`)
-- ✅ URLSession-based BatchSender (POST `/v1/replay/batch`)
-- ✅ UIApplication notification observer (fore/background session boundaries)
-- ✅ SessionRuntime with serial-queue thread safety
-- ✅ Device context (model identifier, viewport, locale, timezone)
-- ✅ Tap tracker — `UIGestureRecognizer` injected per window, walks
-  hit-test result up to the most-specific meaningful ancestor,
-  classifies + extracts value, emits `tap` events
-- ✅ Manual screen tagging (`Replay.tagScreenName`)
-- ✅ Snapshot pipeline (tree + bitmap) — `ViewTreeSerializer` walks
-  the UIView hierarchy and emits `native_snapshot` events on screen
-  change + 500ms after each tap. Full-screen PNG captured via
-  `UIView.drawHierarchy`, SHA-256 hashed, uploaded to
-  `/v1/replay/assets/:hash`, embedded as `root.imageRef`. Player
-  renders pixel-accurate playback.
-- ✅ Persistent upload queue — failed live batches persist to
-  `Application Support/replay-queue/`. Drains on every foreground
-  via the lifecycle observer. Capped at 500 queued files / ~25 MB.
-  iOS has no WorkManager equivalent so v1 is foreground-only;
-  BGTaskScheduler integration is a follow-up.
-- ✅ Network capture — `URLProtocol` subclass auto-installed on
-  `URLSession.shared` + deprecated NSURLConnection traffic. Captures
-  method, URL, status, timing; headers + bodies behind
-  `captureHeaders` / `maxBodyBytes` config flags. Tag-recursion
-  guard prevents the forwarded request from infinitely re-entering
-  the interceptor. Off by default — set `ReplayConfig(captureNetwork:
-  true)` to enable. Limitation: customer URLSessions with custom
-  `protocolClasses` bypass us without an explicit install.
-- ✅ Crash handler — `NSSetUncaughtExceptionHandler` catches Obj-C
-  exceptions; `sigaction` handlers catch SIGSEGV/SIGABRT/SIGBUS/
-  SIGFPE/SIGILL/SIGTRAP. Signal handler writes a tiny ASCII record
-  via async-signal-safe `open()` + `write()` (no allocations, no
-  Swift runtime). Next launch reads the record + emits as an
-  `error` event with `kind:"crash"`. Previous handlers chained
-  (Crashlytics/Sentry still fire); default re-raised so the OS
-  still produces its normal crash report. No PLCrashReporter
-  integration in v1 — symbolicated stack traces are a follow-up.
-- ✅ Occlusion / privacy views — `Replay.addPrivacyView(_:)` marks a
-  UIView (and all descendants) sensitive. Tap events get `isSensitive`
-  with metadata blanked, view-tree nodes get `occluded`, BitmapCapture
-  paints a diagonal-stripe overlay over the region inside the captured
-  PNG. Triple-layer defense.
-- ✅ Native performance metrics — `cold_start_ms` (one-shot first
-  foreground), `frame_drop_pct` + `frozen_frame_count` (CADisplayLink
-  10s rolling window), `memory_rss_mb` (mach_task_basic_info every
-  30s), `thermal_state` (ProcessInfo notification on change). Ships
-  as `performance` events with the same `kind:"perf"` shape the web
-  SDK uses — backend's existing classifier handles them. Deferred:
-  `tap_response_ms`, `first_network_ttfb_ms`, `battery_drain_pct_per_min`,
-  `time_to_first_meaningful_render_ms` (need other hooks first).
-- ✅ SwiftUI view modifiers (separate `ReplaySwiftUI` SPM target) —
-  `.replayOcclude(blockGestures:)` overlays a transparent
-  PrivacyMarker UIView and registers it via `Replay.addPrivacyView`;
-  the SDK's PrivacyRegistry bounds-intersection check picks up
-  SwiftUI content rendered at the same screen rect.
-  `.replayTagScreenName("Login")` fires `Replay.tagScreenName` on
-  first `.onAppear` — fixes the auto-tag gap for SwiftUI-first apps
-  where every screen lives under one root UIViewController.
-
-Each ⏳ corresponds to a follow-up commit; see the design docs in
-the `replay-web-sdk` repo (`mobile-vitals-matrix.md`,
-`native-snapshot-format.md`).
-
-## Quick start
-
-Add to your app's `Package.swift` or via Xcode → File → Add Package
-Dependencies:
+Swift Package Manager — Xcode → File → Add Package Dependencies:
 
 ```
 https://github.com/replayfy/ios-sdk.git
 ```
 
-Then in your `AppDelegate.application(_:didFinishLaunchingWithOptions:)`:
+## Quick start
+
+Call `start(with:)` as early as possible. From an `AppDelegate`:
 
 ```swift
 import Replay
 
-class AppDelegate: UIResponder, UIApplicationDelegate {
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: …) -> Bool {
-        Replay.start(with: ReplayConfig(
-            apiKey: "rpl_pk_…",
-            apiHost: "https://ingest.replayfy.io"
-        ))
-        return true
-    }
+func application(_ application: UIApplication,
+                 didFinishLaunchingWithOptions launchOptions: …) -> Bool {
+    Replay.start(with: ReplayConfig(
+        apiKey: "rpl_pk_xxxxxxxx",
+        apiHost: "https://ingest.replayfy.io"
+    ))
+    return true
 }
 ```
 
-For SwiftUI-only apps (no AppDelegate), the same call goes in your
-`@main App`'s `init`:
+SwiftUI-only apps (no `AppDelegate`) call it from `@main App.init`:
 
 ```swift
 @main
 struct MyApp: App {
     init() {
-        Replay.start(with: ReplayConfig(apiKey: "…", apiHost: "…"))
+        Replay.start(with: ReplayConfig(
+            apiKey: "rpl_pk_xxxxxxxx",
+            apiHost: "https://ingest.replayfy.io"
+        ))
     }
     var body: some Scene { … }
 }
 ```
 
-## API surface
+Attach a known user and fire custom events:
 
 ```swift
-Replay.start(with: config)                       // initialize
-Replay.identify("user-123", properties: ["plan": "pro"])
-Replay.track("checkout_started", properties: ["amount": 99])
-Replay.stop()                                     // manual session end
-Replay.isRecording                                // status
-
-Replay.tagScreenName("Login")                    // (stub)
-Replay.addPrivacyView(myTextField)               // (stub) UIKit
-Replay.pauseRecording()                          // (stub)
-Replay.resumeRecording()                         // (stub)
-Replay.cancelSession()                           // (stub)
+Replay.identify("user_123", properties: ["email": "a@b.com", "plan": "pro"])
+Replay.track("purchase", properties: ["amount": 4200, "currency": "USD"])
 ```
+
+## Configuration — `ReplayConfig`
+
+Only `apiKey` and `apiHost` are required; everything else has a sensible
+default. With `useRemoteConfig = true` (default), your values act as
+cold-start fallbacks — after the first fetch, dashboard settings win
+(15-minute refresh), so flags can change without an app update.
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `apiKey` | `String` | **required** | Project API key from the dashboard |
+| `apiHost` | `String` | **required** | Ingest base URL, e.g. `https://ingest.replayfy.io` |
+| `projectId` | `String?` | `nil` | Only when one key spans multiple projects |
+| `distinctId` | `String?` | `nil` | Known user id at start; else an install-stable anonymous id |
+| `flushInterval` | `TimeInterval` | `5` | Auto-flush cadence (seconds) for the in-memory batch |
+| `maxBufferSize` | `Int` | `500` | Events buffered before a flush is forced |
+| `liveMode` | `Bool` | `true` | Live-presence socket (shows the session "online" on the dashboard) |
+| `captureConsole` | `Bool` | `true` | Capture `print` / `NSLog` / `os_log` |
+| `captureNetwork` | `Bool` | `false` | Capture HTTP requests (off by default — PII risk) |
+| `captureErrors` | `Bool` | `true` | Capture uncaught exceptions / crashes |
+| `captureHeaders` | `Bool` | `false` | Include request/response headers in network capture (PII risk) |
+| `maxBodyBytes` | `Int` | `4096` | Max captured body bytes per network event (truncated above) |
+| `captureSnapshotPixels` | `Bool` | `true` | Pixel-accurate playback vs tree-only "wireframe" |
+| `snapshotInterval` | `TimeInterval` | `0.5` | Snapshot cadence (~2 FPS); floored at 0.2 s |
+| `autoScreenName` | `Bool` | `true` | Auto-detect screen from the foremost `UIViewController` class name |
+| `useRemoteConfig` | `Bool` | `true` | Let dashboard config override these at runtime |
+
+## Privacy & masking
+
+UIKit:
+
+```swift
+Replay.addPrivacyView(cardNumberField)        // mask one view
+Replay.removePrivacyView(cardNumberField)
+
+Replay.occludeAllTextFields(true)             // mask every UITextField/UITextView
+Replay.occludeAllTextView(true)               // mask every UILabel
+Replay.applyOcclusion(CreditCardView.self)    // mask a view class everywhere
+Replay.occludeSensitiveScreen(true)           // mask the whole screen
+Replay.occludeRectsOnNextFrame(rects)         // one-shot rect mask (RN/Flutter)
+```
+
+SwiftUI (via the `ReplaySwiftUI` module):
+
+```swift
+import ReplaySwiftUI
+
+SecretView().replayOcclude()                  // mask this view (blockGestures: Bool = true)
+ProfileScreen().replayTagScreenName("Profile")// tag the screen on first appear
+```
+
+Secure / password fields are masked automatically.
+
+## Network capture
+
+Set `captureNetwork: true`. A `URLProtocol` is auto-installed on
+`URLSession.shared`. For custom `URLSessionConfiguration`s, register
+before constructing the session:
+
+```swift
+let cfg = URLSessionConfiguration.default
+Replay.captureURLSessionConfiguration(cfg)
+let session = URLSession(configuration: cfg)
+```
+
+## API reference
+
+### Active
+
+| Method | Purpose |
+|---|---|
+| `start(with: config)` | Boot + start recording |
+| `identify(_:properties:)` | Attach a known user (`email` / `name` / `plan` are promoted) |
+| `track(_:properties:)` | Custom timeline / funnel event |
+| `tagScreenName(_:)` | Manually set the current screen name |
+| `log(level:message:stack:)` | Bridge a custom logger into the console tab |
+| `addPrivacyView` / `removePrivacyView` | Per-view masking |
+| `occludeAllTextFields` / `occludeAllTextView` | Bulk input / label masking |
+| `applyOcclusion(_:)` / `removeOcclusion(_:)` | Mask all instances of a view class |
+| `occludeSensitiveScreen(_:)` | Full-screen mask |
+| `occludeRectsOnNextFrame(_:)` | One-shot rect masking |
+| `captureURLSessionConfiguration(_:)` | Network capture for a custom session config |
+| `.replayOcclude()` / `.replayTagScreenName(_:)` | SwiftUI view modifiers |
+
+The engine additionally captures automatically: periodic screenshots,
+taps & gestures, screen navigation, performance vitals (cold start,
+frame drops, hangs, memory, thermal, battery), and crashes.
+
+### Coming soon — currently no-ops
+
+These methods exist on the public surface but are **not yet active** —
+they are pending the engine consolidation (see `TODO.md`). Calling them
+today is safe but has no effect:
+
+`stop()` · `isRecording` · `pauseRecording()` / `resumeRecording()` ·
+`cancelSession()` · `optOutOverall(_:)` / `isOptedOutOverall` ·
+`optOutOfSchematicRecordings(_:)` / `isOptedOutOfSchematicRecordings` ·
+`setUserProperty` · `setSessionProperty` · `markSessionAsFavorite()` ·
+`addTagWithProperties` · `reportBugEvent` · `urlForCurrentSession()` /
+`urlForCurrentUser()` · `setAutomaticScreenNameTagging` ·
+`setPushNotificationToken` · `startNewSession()` · `setAppVersion` ·
+`allowShortBreakForAnotherApp` · `setMultiSessionRecord` ·
+`enableAdvancedGestureRecognizer` · `addVerificationListener` /
+`removeVerificationListener` · `stopApplicationAndUploadData`.
+
+> Until these land, do not rely on `optOutOverall` for GDPR compliance.
 
 ## Building locally
 
-Requires Xcode 15+ or the Swift toolchain that ships with macOS
-Command Line Tools.
-
 ```bash
-# Run unit tests
-swift test
-
-# Build for iOS Simulator (requires xcodebuild + Xcode)
-xcodebuild -scheme Replay -destination 'generic/platform=iOS Simulator'
+xcodebuild -scheme Replay -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' build
+xcodebuild -scheme Replay-Package -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 15' test
 ```
-
-## Architecture
-
-Same shape as the Android SDK so cross-platform debugging stays
-symmetric:
-
-| Layer | iOS | Android equivalent |
-|---|---|---|
-| Public API | `Replay.swift` (`enum`) | `Replay.kt` (`object`) |
-| Config | `ReplayConfig.swift` (`struct`) | `ReplayConfig.kt` (data class) |
-| Orchestrator | `Internal/LegacyCore.swift` | `internal/LegacyCore.kt` |
-| Session state | `Internal/SessionRuntime.swift` | `internal/SessionRuntime.kt` |
-| Lifecycle | `Internal/LifecycleObserver.swift` (UIApplication notifications) | `internal/SessionLifecycleObserver.kt` (ProcessLifecycleOwner) |
-| Transport | `Internal/BatchSender.swift` (URLSession) | `internal/BatchSender.kt` (OkHttp) |
-| Schema | `Internal/EventSchema.swift` (Codable) | `internal/EventSchema.kt` |
-
-iOS has **no zero-config bootstrap** like Android's ContentProvider
-— the customer's one-line `start(with:)` call is what brings the
-SDK to life. Matches the UXCam pattern.
 
 ## License
 
