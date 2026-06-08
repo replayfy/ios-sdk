@@ -10,6 +10,11 @@ import UIKit
 public final class ReplayCore {
     public static let shared = ReplayCore()
 
+    /// Wrapper-SDK tag (e.g. "react-native") added to the /start payload so
+    /// the dashboard can show "Captured by …" while the platform stays
+    /// ios/android. Set before start().
+    static var framework: String?
+
     private var transport: MobileTransport?
     private var collector: MobileCollector?
     private var screenshots: MobileScreenshots?
@@ -54,7 +59,7 @@ public final class ReplayCore {
 
     private init() {}
 
-    public func start(projectKey: String, host: String) {
+    public func start(projectKey: String, host: String, recordScreen: Bool = true) {
         // Idempotent: a second start() must not wire a second collector /
         // screenshot timer / perf sampler onto the same singleton.
         if starting { return }
@@ -100,7 +105,8 @@ public final class ReplayCore {
                 self.screenshots = screenshots
 
                 collector.start()
-                screenshots.start()
+                // recordScreen=false → capture events only, no frames archive.
+                if recordScreen { screenshots.start() }
                 self.touch.install { label, x, y, isSwipe, direction in
                     if isSwipe {
                         self.sendSwipe(label: label, x: x, y: y, direction: direction)
@@ -243,6 +249,7 @@ public final class ReplayCore {
         // If identify() ran before start, send the id so the sampling gate can
         // honour alwaysRecordIdentified.
         if let d = distinctID, !d.isEmpty { params["distinctId"] = d }
+        if let fw = framework, !fw.isEmpty { params["framework"] = fw }
         return params
     }
 

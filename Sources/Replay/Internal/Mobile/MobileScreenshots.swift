@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import UIKit
+import CoreImage
 
 /// Periodic screenshot capture → frames archive upload.
 ///
@@ -82,9 +83,16 @@ final class MobileScreenshots {
             guard let ctx = UIGraphicsGetCurrentContext() else { return }
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
 
-            // Mask sensitive regions with a solid box.
-            ctx.setFillColor(UIColor.darkGray.cgColor)
-            for rect in privacy() { ctx.fill(rect) }
+            // Mask sensitive regions the reference way: blur the underlying
+            // content, then overlay diagonal stripes (Android's capture
+            // pipeline paints the matching stripe pattern). Grab the clean
+            // render once so every region blurs the real pixels, not a
+            // region we already masked this pass.
+            let rects = privacy()
+            if !rects.isEmpty,
+               let rendered = UIGraphicsGetImageFromCurrentImageContext()?.cgImage {
+                maskRegions(rects, from: rendered, in: ctx)
+            }
 
             guard let image = UIGraphicsGetImageFromCurrentImageContext(),
                   let jpeg = image.jpegData(compressionQuality: jpegQuality) else { return }
@@ -96,6 +104,56 @@ final class MobileScreenshots {
             lock.unlock()
             if ready { flush() }
         }
+    }
+
+    // ── Privacy masking ──────────────────────────────────────────────
+    private static let ciContext = CIContext(options: nil)
+
+    /// Blur + diagonal-stripe overlay for each sensitive rect (window/point
+    /// coords). Mirrors the reference's iOS privacy render. The rendered
+    /// source is in pixel coords, so scale the rect by screenScale to sample
+    /// the right region.
+    private func maskRegions(_ rects: [CGRect], from rendered: CGImage, in ctx: CGContext) {
+        let stripeWidth: CGFloat = 5.0
+        let stripeSpacing: CGFloat = 15.0
+        let stripeColor = UIColor.gray.withAlphaComponent(0.7)
+        for frame in rects {
+            let cropFrame = CGRect(
+                x: frame.origin.x * screenScale,
+                y: frame.origin.y * screenScale,
+                width: frame.size.width * screenScale,
+                height: frame.size.height * screenScale
+            )
+            guard let region = rendered.cropping(to: cropFrame),
+                  let blurred = blurredRegion(region) else { continue }
+            blurred.draw(in: frame)
+
+            ctx.saveGState()
+            UIRectClip(frame)
+            let totalHeight = frame.size.height
+            for x in stride(from: -totalHeight, to: frame.size.width,
+                            by: stripeSpacing + stripeWidth) {
+                ctx.move(to: CGPoint(x: x + frame.minX, y: frame.minY))
+                ctx.addLine(to: CGPoint(x: x + totalHeight + frame.minX,
+                                        y: totalHeight + frame.minY))
+            }
+            ctx.setLineWidth(stripeWidth)
+            stripeColor.setStroke()
+            ctx.strokePath()
+            ctx.restoreGState()
+        }
+    }
+
+    private func blurredRegion(_ cgImage: CGImage) -> UIImage? {
+        let ciImage = CIImage(cgImage: cgImage)
+        guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(2.5, forKey: kCIInputRadiusKey)
+        guard let output = filter.outputImage,
+              let cg = MobileScreenshots.ciContext.createCGImage(
+                output, from: ciImage.extent)
+        else { return nil }
+        return UIImage(cgImage: cg, scale: screenScale, orientation: .up)
     }
 
     func flush() {

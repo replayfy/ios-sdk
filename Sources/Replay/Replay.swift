@@ -38,7 +38,11 @@ public enum Replay {
         // + binary message protocol → /v1/mobile/*. Replaces the legacy
         // per-snapshot/asset engine (no backward compatibility).
         #if canImport(UIKit)
-        ReplayCore.shared.start(projectKey: config.apiKey, host: config.apiHost)
+        ReplayCore.shared.start(
+            projectKey: config.apiKey,
+            host: config.apiHost,
+            recordScreen: config.captureSnapshotPixels
+        )
         #endif
     }
 

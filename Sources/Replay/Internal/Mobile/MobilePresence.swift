@@ -1,6 +1,8 @@
 #if canImport(UIKit)
 import Foundation
+#if canImport(SocketIO)
 import SocketIO
+#endif
 
 /// Live-presence socket — a faithful port of the web SDK's `presence.ts`.
 ///
@@ -14,12 +16,20 @@ import SocketIO
 /// than the Socket.IO v3 `auth` payload, so the gateway reads credentials
 /// from either location. Entirely best-effort: any failure is swallowed so
 /// presence can never affect capture.
+///
+/// SocketIO is an optional dependency: the SwiftPM build pulls it, but the
+/// dependency-free CocoaPods spec (and any consumer without it) compiles the
+/// socket calls out — presence simply no-ops, capture is unaffected. Guarded
+/// the same way the crash reporter guards `CrashReporter`.
 final class MobilePresence {
+    #if canImport(SocketIO)
     private var manager: SocketManager?
     private var socket: SocketIOClient?
     private var params: [String: Any] = [:]
+    #endif
 
     func start(host: String, projectKey: String, sessionID: String, distinctID: String?) {
+        #if canImport(SocketIO)
         guard let url = URL(string: host) else { return }
         stop()
         params = [
@@ -41,21 +51,26 @@ final class MobilePresence {
         let socket = manager.defaultSocket
         self.socket = socket
         socket.connect()
+        #endif
     }
 
     /// identify() after the socket is up: refresh the credentials used on the
     /// next reconnect and nudge the server.
     func updateDistinctID(_ id: String) {
+        #if canImport(SocketIO)
         guard !id.isEmpty else { return }
         params["distinctId"] = id
         manager?.setConfigs([.connectParams(params)])
         socket?.emit("sdk:identify", ["distinctId": id])
+        #endif
     }
 
     func stop() {
+        #if canImport(SocketIO)
         socket?.disconnect()
         socket = nil
         manager = nil
+        #endif
     }
 }
 #endif

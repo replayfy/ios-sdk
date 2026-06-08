@@ -372,4 +372,66 @@ public final class ReplayBridge: NSObject {
     @objc public static func urlForCurrentUser() -> String? {
         Replay.urlForCurrentUser()
     }
+
+    // -----------------------------------------------------------------
+    //  Live-engine passthroughs for the React Native bridge.
+    //
+    //  These forward straight to the live `ReplayCore` engine (the one
+    //  `Replay.start` drives) rather than the legacy facade methods, so
+    //  RN sessions get real metadata / network / session-id / teardown
+    //  even before the LegacyCore consolidation (TODO #119) lands. They
+    //  live here because ReplayObjC is in-module and can reach
+    //  ReplayCore's internal surface; an external bridge pod cannot.
+    // -----------------------------------------------------------------
+
+    // ReplayCore is UIKit-gated; these forwarders must compile out on
+    // non-UIKit hosts (e.g. the macOS `swift build`) the same way.
+#if canImport(UIKit)
+    /// Live sticky metadata (single key/value). Distinct from
+    /// `setUserProperty`, which is the legacy session-property path.
+    @objc(recordMetadata:value:)
+    public static func recordMetadata(_ key: String, value: String) {
+        ReplayCore.shared.sendMetadata(key: key, value: value)
+    }
+
+    /// Forward one captured RN network call to the live engine. Bodies
+    /// (`request` / `response`) are JSON strings assembled JS-side.
+    @objc(recordNetworkURL:method:request:response:status:duration:)
+    public static func recordNetwork(
+        url: String,
+        method: String,
+        request: String,
+        response: String,
+        status: Int,
+        duration: Int
+    ) {
+        ReplayCore.shared.sendNetwork(
+            type: "fetch",
+            method: method,
+            url: url,
+            request: request,
+            response: response,
+            status: UInt64(max(0, status)),
+            duration: UInt64(max(0, duration))
+        )
+    }
+
+    /// Active live-engine session id (nil when not recording).
+    @objc public static func currentSessionId() -> String? {
+        ReplayCore.shared.sessionID
+    }
+
+    /// Tag this session's wrapper SDK (e.g. "react-native"). Sent on /start so
+    /// the dashboard shows "Captured by …" while platform stays ios/android.
+    /// Call before `Replay.start`.
+    @objc(setFramework:)
+    public static func setFramework(_ name: String) {
+        ReplayCore.framework = name
+    }
+
+    /// Stop the live recording engine + flush.
+    @objc public static func stopEngine() {
+        ReplayCore.shared.stop()
+    }
+#endif
 }
