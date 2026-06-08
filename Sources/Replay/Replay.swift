@@ -38,11 +38,7 @@ public enum Replay {
         // + binary message protocol → /v1/mobile/*. Replaces the legacy
         // per-snapshot/asset engine (no backward compatibility).
         #if canImport(UIKit)
-        ReplayCore.shared.start(
-            projectKey: config.apiKey,
-            host: config.apiHost,
-            recordScreen: config.captureSnapshotPixels
-        )
+        ReplayCore.shared.start(config: config)
         #endif
     }
 
@@ -255,6 +251,12 @@ public enum Replay {
     /// collapsed to one boolean for the idiomatic Swift shape.
     public static func optOutOverall(_ optOut: Bool) {
         LegacyCore.shared.setOverallOptOut(optOut)
+        #if canImport(UIKit)
+        // GDPR: enforce on the LIVE engine, not just the legacy facade —
+        // stop recording immediately when the user opts out. Opt-in takes
+        // effect on the next start()/launch.
+        if optOut { ReplayCore.shared.stop() }
+        #endif
     }
 
     /// Whether the customer is currently opted out overall.

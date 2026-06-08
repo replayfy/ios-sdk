@@ -59,11 +59,17 @@ public final class ReplayCore {
 
     private init() {}
 
-    public func start(projectKey: String, host: String, recordScreen: Bool = true) {
+    public func start(config: ReplayConfig) {
         // Idempotent: a second start() must not wire a second collector /
         // screenshot timer / perf sampler onto the same singleton.
         if starting { return }
+        // GDPR: honour an overall opt-out on the LIVE engine — never open a
+        // session while opted out (the legacy facade checked this; the live
+        // engine didn't).
+        if OptOutStore.shared.overallOptOut { return }
         starting = true
+        let projectKey = config.apiKey
+        let host = config.apiHost
         self.projectKey = projectKey
         self.host = host
         let transport = MobileTransport(baseURL: host, projectKey: projectKey)
@@ -78,8 +84,10 @@ public final class ReplayCore {
             DispatchQueue.main.async {
                 self.sessionID = resp.sessionID
                 self.startedAt = nowMs()
-                self.captureConsole = resp.captureConsole ?? true
-                self.captureNetwork = resp.captureNetwork ?? true
+                // Client config is the default; remote-config (the /start
+                // response) overrides it when the server specifies a value.
+                self.captureConsole = resp.captureConsole ?? config.captureConsole
+                self.captureNetwork = resp.captureNetwork ?? config.captureNetwork
 
                 // Open the live-presence socket now we have a session id. Uses
                 // the distinct id known so far (identify() before /start
@@ -105,8 +113,8 @@ public final class ReplayCore {
                 self.screenshots = screenshots
 
                 collector.start()
-                // recordScreen=false → capture events only, no frames archive.
-                if recordScreen { screenshots.start() }
+                // captureSnapshotPixels=false → events only, no frames archive.
+                if config.captureSnapshotPixels { screenshots.start() }
                 self.touch.install { label, x, y, isSwipe, direction in
                     if isSwipe {
                         self.sendSwipe(label: label, x: x, y: y, direction: direction)
@@ -115,8 +123,10 @@ public final class ReplayCore {
                     }
                 }
                 // Screen tracking → viewComponent messages.
-                MobileScreenTracker.install { [weak self] screen, visible in
-                    self?.sendScreen(screenName: screen, viewName: screen, visible: visible)
+                if config.autoScreenName {
+                    MobileScreenTracker.install { [weak self] screen, visible in
+                        self?.sendScreen(screenName: screen, viewName: screen, visible: visible)
+                    }
                 }
                 // Performance metrics → performanceEvent messages.
                 let perf = MobilePerfMonitor { [weak self] name, value in
@@ -125,8 +135,10 @@ public final class ReplayCore {
                 perf.start()
                 self.perf = perf
                 // Uncaught-exception crash reporting.
-                MobileCrashHandler.install { [weak self] name, reason, stack in
-                    self?.sendCrash(name: name, reason: reason, stacktrace: stack)
+                if config.captureErrors {
+                    MobileCrashHandler.install { [weak self] name, reason, stack in
+                        self?.sendCrash(name: name, reason: reason, stacktrace: stack)
+                    }
                 }
                 self.registerLifecycle()
 
