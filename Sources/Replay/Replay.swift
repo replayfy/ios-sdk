@@ -225,13 +225,17 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `pauseScreenRecording()`.
     public static func pauseRecording() {
-        LegacyCore.shared.setSnapshotPaused(true)
+        #if canImport(UIKit)
+        ReplayCore.shared.pauseCapture()
+        #endif
     }
 
     /// Resume schematic capture after ``pauseRecording()``.
     /// Mirrors the reference mobile SDK's `resumeScreenRecording()`.
     public static func resumeRecording() {
-        LegacyCore.shared.setSnapshotPaused(false)
+        #if canImport(UIKit)
+        ReplayCore.shared.resumeCapture()
+        #endif
     }
 
     /// Discard the current session entirely — clears the in-memory
@@ -351,7 +355,9 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `setAutomaticScreenNameTagging(_:)`.
     public static func setAutomaticScreenNameTagging(_ enabled: Bool) {
-        LegacyCore.shared.setAutomaticScreenNameTagging(enabled)
+        #if canImport(UIKit)
+        ReplayCore.shared.setAutoScreenName(enabled)
+        #endif
     }
 
     /// Attach the device's push-notification token to the session.
@@ -364,7 +370,10 @@ public enum Replay {
         _ token: String,
         platform: String = "apns"
     ) {
-        LegacyCore.shared.setPushNotificationToken(token, platform: platform)
+        #if canImport(UIKit)
+        ReplayCore.shared.sendMetadata(key: "$push_token", value: token)
+        ReplayCore.shared.sendMetadata(key: "$push_platform", value: platform)
+        #endif
     }
 
     /// Flag the current session as a favorite so it surfaces in the
@@ -373,7 +382,9 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `markSessionAsFavorite()`.
     public static func markSessionAsFavorite() {
-        LegacyCore.shared.markSessionAsFavorite()
+        #if canImport(UIKit)
+        ReplayCore.shared.sendMetadata(key: "$favorited", value: "true")
+        #endif
     }
 
     /// Attach a SESSION-level tag (with optional properties) for
@@ -405,7 +416,9 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `startNewSession()`.
     public static func startNewSession() {
-        LegacyCore.shared.startNewSession()
+        #if canImport(UIKit)
+        ReplayCore.shared.startNewSession()
+        #endif
     }
 
     /// Override the host app's marketing version + build that the
@@ -426,7 +439,10 @@ public enum Replay {
     /// dSYM for crash stacks. Pass nil to clear the override and
     /// fall back to Bundle.main.
     public static func setAppVersion(_ version: String?, build: String? = nil) {
-        LegacyCore.shared.setAppVersionOverride(version: version, build: build)
+        #if canImport(UIKit)
+        if let version = version { ReplayCore.shared.sendMetadata(key: "$app_version", value: version) }
+        if let build = build { ReplayCore.shared.sendMetadata(key: "$app_build", value: build) }
+        #endif
     }
 
     /// Wire network capture for a custom `URLSessionConfiguration`.
@@ -500,12 +516,18 @@ public enum Replay {
     /// the reference mobile SDK's `addVerificationListener(VerificationListener)`.
     @discardableResult
     public static func addVerificationListener(_ listener: @escaping () -> Void) -> UUID {
-        return LegacyCore.shared.addVerificationListener(listener)
+        #if canImport(UIKit)
+        return ReplayCore.shared.addVerificationListener(listener)
+        #else
+        return UUID()
+        #endif
     }
 
     /// Drop a previously-added verification listener.
     public static func removeVerificationListener(_ token: UUID) {
-        LegacyCore.shared.removeVerificationListener(token)
+        #if canImport(UIKit)
+        ReplayCore.shared.removeVerificationListener(token)
+        #endif
     }
 
     /// Manual bug-report event. Wire to a "Send Feedback" /

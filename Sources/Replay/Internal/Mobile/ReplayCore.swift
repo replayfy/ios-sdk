@@ -52,6 +52,13 @@ public final class ReplayCore {
     private var preStart: [Data] = []
     private var ready = false
     private var starting = false
+    // Config retained from the first start() so startNewSession() can restart.
+    private var lastConfig: ReplayConfig?
+    // Runtime auto screen-name toggle (set from config; flipped by
+    // setAutomaticScreenNameTagging).
+    private var autoScreenName = true
+    // Onboarding/verification callbacks, fired when /start succeeds.
+    private var verificationListeners: [UUID: () -> Void] = [:]
 
     /// Sensitive window-coordinate rects to mask in screenshots.
     /// Wired to the privacy registry by the host SDK.
@@ -72,6 +79,8 @@ public final class ReplayCore {
         let host = config.apiHost
         self.projectKey = projectKey
         self.host = host
+        self.lastConfig = config
+        self.autoScreenName = config.autoScreenName
         let transport = MobileTransport(baseURL: host, projectKey: projectKey)
         self.transport = transport
 
@@ -122,11 +131,12 @@ public final class ReplayCore {
                         self.sendClick(label: label, x: x, y: y)
                     }
                 }
-                // Screen tracking → viewComponent messages.
-                if config.autoScreenName {
-                    MobileScreenTracker.install { [weak self] screen, visible in
-                        self?.sendScreen(screenName: screen, viewName: screen, visible: visible)
-                    }
+                // Screen tracking → viewComponent messages. Gated at emission
+                // (not install) so setAutomaticScreenNameTagging can toggle it
+                // at runtime.
+                MobileScreenTracker.install { [weak self] screen, visible in
+                    guard self?.autoScreenName == true else { return }
+                    self?.sendScreen(screenName: screen, viewName: screen, visible: visible)
                 }
                 // Performance metrics → performanceEvent messages.
                 let perf = MobilePerfMonitor { [weak self] name, value in
@@ -152,6 +162,8 @@ public final class ReplayCore {
                 self.preStartLock.unlock()
 
                 self.active = true
+                // Session is live — fire onboarding/verification listeners.
+                for listener in self.verificationListeners.values { listener() }
             }
         }
     }
@@ -178,6 +190,36 @@ public final class ReplayCore {
         NotificationCenter.default.removeObserver(self)
         sessionID = nil
         preStartLock.lock(); preStart.removeAll(); ready = false; preStartLock.unlock()
+    }
+
+    // ── Lifecycle controls (facade re-homes, #119) ───────────────────
+    /// Pause periodic screenshot capture; events keep flowing.
+    func pauseCapture() { screenshots?.pause() }
+
+    /// Resume periodic screenshot capture.
+    func resumeCapture() { screenshots?.resume() }
+
+    /// Toggle auto screen-name tagging at runtime.
+    func setAutoScreenName(_ enabled: Bool) { autoScreenName = enabled }
+
+    /// End the current session and immediately start a fresh one using the
+    /// config retained from the first start(). No-op before start() runs.
+    func startNewSession() {
+        guard let cfg = lastConfig else { return }
+        stop()
+        start(config: cfg)
+    }
+
+    /// Register an onboarding/verification callback fired when /start
+    /// succeeds. Returns a token for removal.
+    func addVerificationListener(_ listener: @escaping () -> Void) -> UUID {
+        let id = UUID()
+        verificationListeners[id] = listener
+        return id
+    }
+
+    func removeVerificationListener(_ token: UUID) {
+        verificationListeners.removeValue(forKey: token)
     }
 
     // ── Message API (called by listeners) ────────────────────────────
