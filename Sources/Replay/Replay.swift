@@ -99,14 +99,20 @@ public enum Replay {
     /// or end-of-onboarding screens where you want the session to
     /// close immediately rather than at next backgrounding.
     public static func stop() {
-        LegacyCore.shared.stop()
+        #if canImport(UIKit)
+        ReplayCore.shared.stop()
+        #endif
     }
 
     /// Whether the SDK is currently recording. Returns false when
     /// `start(with:)` hasn't been called, when the user is opted
     /// out, or when a sampling decision dropped the current session.
     public static var isRecording: Bool {
-        LegacyCore.shared.isRecording
+        #if canImport(UIKit)
+        return ReplayCore.shared.sessionID != nil
+        #else
+        return false
+        #endif
     }
 
     // MARK: - Stubs (engine in follow-up commits)
@@ -313,7 +319,10 @@ public enum Replay {
     /// Common use: `Replay.setUserProperty("plan", value: "pro")`
     /// or `Replay.setUserProperty("signupSource", value: "google_ads")`.
     public static func setUserProperty(_ key: String, value: Any?) {
-        LegacyCore.shared.setUserProperty(key, value: value)
+        guard let value = value else { return }
+        #if canImport(UIKit)
+        ReplayCore.shared.sendMetadata(key: key, value: String(describing: value))
+        #endif
     }
 
     /// Attach a sticky property to the CURRENT SESSION. Visible on
@@ -324,7 +333,10 @@ public enum Replay {
     /// `Replay.setSessionProperty("ab_variant", value: "B")`,
     /// `Replay.setSessionProperty("checkout_step", value: "shipping")`.
     public static func setSessionProperty(_ key: String, value: Any?) {
-        LegacyCore.shared.setSessionProperty(key, value: value)
+        guard let value = value else { return }
+        #if canImport(UIKit)
+        ReplayCore.shared.sendMetadata(key: key, value: String(describing: value))
+        #endif
     }
 
     // -----------------------------------------------------------------
@@ -374,7 +386,15 @@ public enum Replay {
         _ name: String,
         properties: [String: Any]? = nil
     ) {
-        LegacyCore.shared.addTagWithProperties(name, properties: properties)
+        #if canImport(UIKit)
+        var payload = ""
+        if let properties = properties,
+           let data = try? JSONSerialization.data(withJSONObject: properties),
+           let str = String(data: data, encoding: .utf8) {
+            payload = str
+        }
+        ReplayCore.shared.sendEvent(name: name, payload: payload)
+        #endif
     }
 
     /// Force-end the current session + spin up a fresh one. Useful
@@ -500,11 +520,17 @@ public enum Replay {
         description: String? = nil,
         properties: [String: Any]? = nil
     ) {
-        LegacyCore.shared.reportBugEvent(
-            name: name,
-            description: description,
-            properties: properties
-        )
+        #if canImport(UIKit)
+        var props: [String: Any] = ["name": name]
+        if let description = description { props["description"] = description }
+        if let properties = properties { props.merge(properties) { _, new in new } }
+        var payload = ""
+        if let data = try? JSONSerialization.data(withJSONObject: props),
+           let str = String(data: data, encoding: .utf8) {
+            payload = str
+        }
+        ReplayCore.shared.sendEvent(name: "$bug_report", payload: payload)
+        #endif
     }
 
     /// Stop recording AND block (up to `timeoutSeconds`) until the
@@ -516,7 +542,10 @@ public enum Replay {
     /// Mirrors the reference mobile SDK's `stopApplicationAndUploadData()`. Default
     /// timeout 5s.
     public static func stopApplicationAndUploadData(timeoutSeconds: TimeInterval = 5) {
-        LegacyCore.shared.stopApplicationAndUploadData(timeoutSeconds: timeoutSeconds)
+        #if canImport(UIKit)
+        // stop() flushes the in-memory batch as it tears the engine down.
+        ReplayCore.shared.stop()
+        #endif
     }
 
     /// Bridge customer-side logging into the SDK's console-event
@@ -536,7 +565,6 @@ public enum Replay {
         message: String,
         stack: String? = nil
     ) {
-        LegacyCore.shared.logExplicit(level: level, message: message, stack: stack)
         #if canImport(UIKit)
         // Bridge into the binary message stream → dashboard console tab.
         ReplayCore.shared.sendLog(severity: level, content: stack != nil ? "\(message)\n\(stack!)" : message)
