@@ -2,7 +2,14 @@
 
 ## #119 — Consolidate `LegacyCore` into `ReplayCore` (remove the duplicate engine)
 
-**Status:** pending · **Priority:** high (includes a correctness gap)
+**Status:** in progress · **Priority:** high (includes a correctness gap)
+
+> **Done:** the GDPR opt-out gap is closed — the live `ReplayCore` now
+> refuses to start while opted out and stops on `optOutOverall(true)`
+> (previously only the inert `LegacyCore` consulted the opt-out store).
+> **Remaining:** re-home the ~25 no-op facade methods (below). These are
+> UXCam-parity methods the reference doesn't have, so this part is our own
+> design, not a reference port.
 
 ### Problem
 The SDK currently has two engines:
