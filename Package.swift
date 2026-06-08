@@ -39,7 +39,7 @@ let package = Package(
         // covers ~99%. Brought in as SwiftPM transitive dep — adds
         // ~150 KB to the binary, no other runtime deps.
         //
-        // UXCam ships PLCrashReporter symbols inside their iOS binary
+        // the reference mobile SDK ships PLCrashReporter symbols inside their iOS binary
         // (verified via `nm`), so this puts us at parity on iOS
         // crash reliability.
         .package(

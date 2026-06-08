@@ -34,7 +34,7 @@ import UIKit
 ///     levels into 5% buckets. The poll guarantees at least one
 ///     sample per minute regardless of charging state.
 ///
-/// UXCam ships battery monitoring on iOS but NOT on Android — this
+/// the reference mobile SDK ships battery monitoring on iOS but NOT on Android — this
 /// closes the gap.
 final class BatteryMonitor {
 

@@ -8,7 +8,7 @@
 > refuses to start while opted out and stops on `optOutOverall(true)`
 > (previously only the inert `LegacyCore` consulted the opt-out store).
 > **Remaining:** re-home the ~25 no-op facade methods (below). These are
-> UXCam-parity methods the reference doesn't have, so this part is our own
+> industry-standard methods the reference doesn't have, so this part is our own
 > design, not a reference port.
 
 ### Problem

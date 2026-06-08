@@ -148,7 +148,7 @@ final class LegacyCore {
             let snapshot = SnapshotCapture { [weak self] snap in
                 self?.emitSnapshot(snap)
             }
-            // UXCam-style continuous capture — ~2 FPS while in the
+            // industry-standard continuous capture — ~2 FPS while in the
             // foreground so playback feels like video instead of a
             // gallery of stills. Stopped on background / pause /
             // session stop, restarted on foreground.
@@ -280,7 +280,7 @@ final class LegacyCore {
             // dashboard's user list + filters). Everything else
             // stays in customProps as a JSON blob.
             //
-            // Matches UXCam's behaviour: setUserIdentity(...) +
+            // Matches the reference mobile SDK's behaviour: setUserIdentity(...) +
             // setUserProperty("email", "foo@bar") populates the
             // email column even when the customer passed it via
             // the generic properties bag.
@@ -309,7 +309,7 @@ final class LegacyCore {
         }
     }
 
-    // MARK: - setUserProperty / setSessionProperty (UXCam-parity)
+    // MARK: - setUserProperty / setSessionProperty (industry-standard)
     //
     // User props ride on EndUser.customProps via the IdentifyPayload
     // that's re-shipped with every batch — we keep a local
@@ -318,7 +318,7 @@ final class LegacyCore {
     // — dashboard rendering as filterable Session columns is a
     // separate follow-up (see docs/sdk-capture-matrix.md).
     //
-    // Mirrors UXCam's setUserProperty / setSessionProperty per-
+    // Mirrors the reference mobile SDK's setUserProperty / setSessionProperty per-
     // primitive overloads; Swift's Any subsumes them.
 
     private var userProps: [String: Any] = [:]
@@ -331,7 +331,7 @@ final class LegacyCore {
         guard !trimmed.isEmpty else { return }
         let safeKey = String(trimmed.prefix(80))
         queue.async {
-            // Nullify == remove (matches UXCam's contract for empty-
+            // Nullify == remove (matches the reference mobile SDK's contract for empty-
             // string values + the SDK norm of nil-as-delete).
             if let v = value {
                 self.userProps[safeKey] = v
@@ -378,7 +378,7 @@ final class LegacyCore {
     }
 
     // -----------------------------------------------------------------
-    //  UXCam-parity session-control surface
+    //  industry-standard session-control surface
     // -----------------------------------------------------------------
 
     /// Flip the auto-screen-detect swizzle on/off at runtime. Mirrors
@@ -447,7 +447,7 @@ final class LegacyCore {
     }
 
     /// Attach a SESSION-level tag with optional properties. Distinct
-    /// from `track()` (which is event-level): UXCam customers use
+    /// from `track()` (which is event-level): the reference mobile SDK customers use
     /// session tags for "this session belongs to A/B variant X" or
     /// "this session is part of the holiday-checkout flow" — values
     /// that filter the whole session list rather than show up as
@@ -476,7 +476,7 @@ final class LegacyCore {
     }
 
     // -----------------------------------------------------------------
-    //  Verification listeners (UXCam onboarding parity)
+    //  Verification listeners (the reference mobile SDK onboarding parity)
     // -----------------------------------------------------------------
 
     /// Verification listeners — fired after the SDK's first
@@ -530,7 +530,7 @@ final class LegacyCore {
         }
     }
 
-    /// Emit a manual bug-report event. UXCam customers wire this
+    /// Emit a manual bug-report event. the reference mobile SDK customers wire this
     /// to a "Send Feedback" / "Report Issue" button — the
     /// dashboard surfaces these as flagged events in the session
     /// timeline so support can jump to the relevant moment with
@@ -538,7 +538,7 @@ final class LegacyCore {
     ///
     /// Triggers an IMMEDIATE snapshot so fresh pixels accompany
     /// the report timestamp regardless of the regular capture
-    /// cadence. Mirrors UXCam's `reportBugEvent(name:description:)`.
+    /// cadence. Mirrors the reference mobile SDK's `reportBugEvent(name:description:)`.
     func reportBugEvent(
         name: String,
         description: String? = nil,
@@ -572,7 +572,7 @@ final class LegacyCore {
         }
     }
 
-    /// Force-end the current session + start a fresh one. UXCam's
+    /// Force-end the current session + start a fresh one. the reference mobile SDK's
     /// `startNewSession()` — used by customers who track logical
     /// boundaries (user logout → login as different user; A/B
     /// re-bucketing; "start over" buttons) inside one app process.
@@ -608,7 +608,7 @@ final class LegacyCore {
     /// on timeout. Always tears down regardless of upload outcome
     /// — the disk-queue picks up unsent batches on next start().
     // -----------------------------------------------------------------
-    //  GDPR opt-in / opt-out (UXCam parity)
+    //  GDPR opt-in / opt-out (the reference mobile SDK parity)
     // -----------------------------------------------------------------
 
     /// Snapshot-pipeline pause flag — toggled by `Replay.pauseRecording` /
@@ -617,7 +617,7 @@ final class LegacyCore {
     private var snapshotPaused: Bool = false
 
     // -----------------------------------------------------------------
-    //  App-version override (UXCam-style customer-supplied versioning)
+    //  App-version override (industry-standard customer-supplied versioning)
     // -----------------------------------------------------------------
     //
     // CFBundleShortVersionString + CFBundleVersion are auto-read at
@@ -638,7 +638,7 @@ final class LegacyCore {
     }
 
     // -----------------------------------------------------------------
-    //  Session lifecycle controls (UXCam allowShortBreak +
+    //  Session lifecycle controls (the reference mobile SDK allowShortBreak +
     //  setMultiSessionRecord)
     // -----------------------------------------------------------------
 
@@ -656,7 +656,7 @@ final class LegacyCore {
 
     /// Toggle capture of advanced gestures — long-press, swipe
     /// (four directions), pinch — in addition to the always-on
-    /// tap. Mirrors UXCam's
+    /// tap. Mirrors the reference mobile SDK's
     /// `enableAdvancedGestureRecognizer(_:)`.
     func setAdvancedGesturesEnabled(_ enabled: Bool) {
         #if canImport(UIKit)
@@ -669,7 +669,7 @@ final class LegacyCore {
     /// Toggle short-break behaviour. When true, a backgrounding
     /// of ≤ [windowSeconds] does NOT end the session — the same
     /// session resumes when the user returns. Default false.
-    /// Mirrors UXCam's `allowShortBreakForAnotherApp(_:)`.
+    /// Mirrors the reference mobile SDK's `allowShortBreakForAnotherApp(_:)`.
     func setAllowShortBreak(_ allow: Bool, windowSeconds: TimeInterval = 30) {
         allowShortBreak = allow
         shortBreakSeconds = max(0, windowSeconds)
@@ -679,7 +679,7 @@ final class LegacyCore {
 
     /// When false, only ONE session fires per app process.
     /// Subsequent foregroundings after session_end are no-ops.
-    /// Default true. Mirrors UXCam's `setMultiSessionRecord(_:)`.
+    /// Default true. Mirrors the reference mobile SDK's `setMultiSessionRecord(_:)`.
     func setMultiSessionRecord(_ enabled: Bool) {
         multiSessionRecord = enabled
     }
@@ -984,7 +984,7 @@ final class LegacyCore {
         // the session row's creation, the second snapshot will
         // catch up.
         snapshotCapture?.captureNow(trigger: "screen_appeared")
-        // Resume the UXCam-style continuous capture loop. Idempotent
+        // Resume the industry-standard continuous capture loop. Idempotent
         // — startPeriodic cancels the previous timer first, so an
         // accidental double-foreground (e.g. iOS handing us
         // willEnterForeground + didBecomeActive close together)

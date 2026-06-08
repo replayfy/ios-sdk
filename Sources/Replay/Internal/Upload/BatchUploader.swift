@@ -26,7 +26,7 @@ final class BatchUploader {
     /// One-shot callback fired the first time a batch successfully
     /// reaches the backend. Used by ``LegacyCore`` to drain
     /// verification listeners registered via
-    /// `Replay.addVerificationListener` — mirrors UXCam's
+    /// `Replay.addVerificationListener` — mirrors the reference mobile SDK's
     /// `VerificationListener.onVerificationSuccess`.
     ///
     /// Cleared after firing once so subsequent uploads don't

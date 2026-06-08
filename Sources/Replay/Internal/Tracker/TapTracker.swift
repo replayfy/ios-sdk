@@ -16,7 +16,7 @@ import UIKit
 /// swizzling: swizzling system methods is fragile, frowned upon by
 /// reviewers (App Store risk), and breaks under SwiftUI's hosting
 /// views. UIGestureRecognizer injection is the documented Apple way
-/// to observe touches, and matches what UXCam ships per their
+/// to observe touches, and matches what the reference mobile SDK ships per their
 /// public `+GetGestureRecognizers` API.
 ///
 /// Mirrors the Android SDK's `TapTracker.kt`. We keep the same
@@ -162,7 +162,7 @@ final class TapTracker: NSObject {
         // Pinch — fires on .ended so we report the FINAL scale
         // (intermediate scale values stream during the gesture but
         // shipping them all would flood the timeline; one event per
-        // gesture matches UXCam's semantics).
+        // gesture matches the reference mobile SDK's semantics).
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
         pinch.delegate = self
         pinch.cancelsTouchesInView = false

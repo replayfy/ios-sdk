@@ -44,7 +44,7 @@ import WebKit
 ///
 /// This 1-frame-behind staleness is acceptable: snapshots fire
 /// every ~1 second (idle) or on screen-change. The lag matches
-/// what UXCam ships.
+/// what the reference mobile SDK ships.
 ///
 /// **Storage**
 ///

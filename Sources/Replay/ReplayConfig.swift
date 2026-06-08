@@ -55,7 +55,7 @@ public struct ReplayConfig {
 
     /// Cadence of the continuous snapshot loop, in seconds.
     ///
-    /// Matches UXCam's default ~2 FPS (0.5 s). Lower values mean
+    /// Matches the reference mobile SDK's default ~2 FPS (0.5 s). Lower values mean
     /// smoother playback at the cost of CPU + upload bandwidth.
     /// Floor is clamped to 0.2 s inside
     /// ``Replay/Internal/Capture/SnapshotCapture/startPeriodic()``.

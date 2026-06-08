@@ -73,9 +73,9 @@ final class SnapshotCapture {
     /// short-circuits at the pushLocked level).
     var enabled: Bool = true
 
-    /// UXCam-style periodic capture cadence (in seconds).
+    /// industry-standard periodic capture cadence (in seconds).
     ///
-    /// UXCam reverse-engineered: their default capture rate is ~2 FPS
+    /// the reference mobile SDK reverse-engineered: their default capture rate is ~2 FPS
     /// (every 0.5 s) during an active session. Without a continuous
     /// loop, a session that doesn't change screens produces one
     /// snapshot total and the player feels like a static image. With

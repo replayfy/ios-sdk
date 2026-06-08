@@ -67,7 +67,7 @@ final class BatchSender {
         // billable bytes. Express's `json()` middleware on the
         // backend auto-inflates when Content-Encoding: gzip is set
         // (inflate:true default), so zero backend change needed.
-        // UXCam bundles minizip for the same purpose.
+        // the reference mobile SDK bundles minizip for the same purpose.
         //
         // Sub-256-byte bodies skip compression — gzip's 18-byte
         // header + trailer would inflate very small payloads.

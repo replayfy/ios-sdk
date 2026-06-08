@@ -25,7 +25,7 @@ import CrashReporter
 ///      register state at crash time, walks the stack, formats a
 ///      report we can ship to the dashboard.
 ///
-///   4. **Battle-tested** — UXCam, HockeyApp, AppCenter,
+///   4. **Battle-tested** — the reference mobile SDK, HockeyApp, AppCenter,
 ///      Microsoft's own crash reporter all ship this. Edge cases
 ///      across iOS versions, swift runtime, ARM64e are handled.
 ///

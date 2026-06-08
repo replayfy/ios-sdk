@@ -11,7 +11,7 @@ import UIKit
 ///
 /// API parallels the Android SDK's `Replay` object so cross-platform
 /// codebases (and our own docs) stay symmetric. We don't subclass
-/// UXCam's `+optInOverall`-style API surface 1:1 — we adopt the
+/// the reference mobile SDK's `+optInOverall`-style API surface 1:1 — we adopt the
 /// modern Swift idioms (lowercase methods, structured concurrency,
 /// optional params) while keeping the underlying capabilities the same.
 ///
@@ -147,7 +147,7 @@ public enum Replay {
     /// ``addPrivacyView(_:)``. Useful default-on PII protection when
     /// the app routinely handles sensitive input.
     ///
-    /// Mirrors UXCam's `occludeAllTextFields(_:)`.
+    /// Mirrors the reference mobile SDK's `occludeAllTextFields(_:)`.
     public static func occludeAllTextFields(_ occlude: Bool) {
         PrivacyRegistry.shared.occludeAllTextFields = occlude
     }
@@ -156,7 +156,7 @@ public enum Replay {
     /// text. Pair with ``occludeAllTextFields(_:)`` to redact 100%
     /// of textual content in the captured snapshot.
     ///
-    /// Mirrors UXCam's `occludeAllTextView(_:)`.
+    /// Mirrors the reference mobile SDK's `occludeAllTextView(_:)`.
     public static func occludeAllTextView(_ occlude: Bool = true) {
         PrivacyRegistry.shared.occludeAllTextViews = occlude
     }
@@ -171,7 +171,7 @@ public enum Replay {
     /// Cheap when no classes registered (~zero overhead). Class
     /// set size is typically single-digit in practice.
     ///
-    /// Mirrors UXCam's `applyOcclusion(_:)`.
+    /// Mirrors the reference mobile SDK's `applyOcclusion(_:)`.
     public static func applyOcclusion(_ viewClass: UIView.Type) {
         PrivacyRegistry.shared.applyOcclusion(viewClass)
     }
@@ -188,7 +188,7 @@ public enum Replay {
     /// (health records, banking pin pad, etc.). Set false to
     /// restore normal capture.
     ///
-    /// Mirrors UXCam's `occludeSensitiveScreen(_:)`.
+    /// Mirrors the reference mobile SDK's `occludeSensitiveScreen(_:)`.
     public static func occludeSensitiveScreen(_ occlude: Bool) {
         PrivacyRegistry.shared.occludeAllScreen = occlude
     }
@@ -206,7 +206,7 @@ public enum Replay {
     /// occluded). Calling it again without a snapshot in between
     /// REPLACES (does not append to) the prior set.
     ///
-    /// Mirrors UXCam's `occludeRectsOnNextFrame(rects)`.
+    /// Mirrors the reference mobile SDK's `occludeRectsOnNextFrame(rects)`.
     public static func occludeRectsOnNextFrame(_ rects: [CGRect]) {
         PrivacyRegistry.shared.setPendingFrameRects(rects)
     }
@@ -217,13 +217,13 @@ public enum Replay {
     /// process restart resets to running. Use
     /// ``optOutOfSchematicRecordings(_:)`` for a durable opt-out.
     ///
-    /// Mirrors UXCam's `pauseScreenRecording()`.
+    /// Mirrors the reference mobile SDK's `pauseScreenRecording()`.
     public static func pauseRecording() {
         LegacyCore.shared.setSnapshotPaused(true)
     }
 
     /// Resume schematic capture after ``pauseRecording()``.
-    /// Mirrors UXCam's `resumeScreenRecording()`.
+    /// Mirrors the reference mobile SDK's `resumeScreenRecording()`.
     public static func resumeRecording() {
         LegacyCore.shared.setSnapshotPaused(false)
     }
@@ -233,13 +233,13 @@ public enum Replay {
     /// upload. The session never reaches the backend. Different
     /// from ``stop()`` (graceful end + upload).
     ///
-    /// Mirrors UXCam's `cancelCurrentSession()`.
+    /// Mirrors the reference mobile SDK's `cancelCurrentSession()`.
     public static func cancelSession() {
         LegacyCore.shared.cancelCurrentSession()
     }
 
     // -----------------------------------------------------------------
-    //  UXCam-parity GDPR opt-in / opt-out
+    //  industry-standard GDPR opt-in / opt-out
     // -----------------------------------------------------------------
 
     /// Overall opt-out. When set to true: every event drops at the
@@ -247,7 +247,7 @@ public enum Replay {
     /// across launches via UserDefaults. The customer MUST call
     /// again with false to start recording again.
     ///
-    /// Mirrors UXCam's `optOutOverall()` / `optInOverall()` —
+    /// Mirrors the reference mobile SDK's `optOutOverall()` / `optInOverall()` —
     /// collapsed to one boolean for the idiomatic Swift shape.
     public static func optOutOverall(_ optOut: Bool) {
         LegacyCore.shared.setOverallOptOut(optOut)
@@ -268,7 +268,7 @@ public enum Replay {
     /// capture stops but every other event type keeps flowing.
     /// Persisted across launches.
     ///
-    /// Mirrors UXCam's `optOutOfSchematicRecordings()` /
+    /// Mirrors the reference mobile SDK's `optOutOfSchematicRecordings()` /
     /// `optIntoSchematicRecordings()`.
     public static func optOutOfSchematicRecordings(_ optOut: Bool) {
         LegacyCore.shared.setSchematicOptOut(optOut)
@@ -280,7 +280,7 @@ public enum Replay {
     }
 
     // -----------------------------------------------------------------
-    //  UXCam-parity deep-link helpers
+    //  industry-standard deep-link helpers
     // -----------------------------------------------------------------
 
     /// Dashboard URL for the current session, or nil when no
@@ -288,7 +288,7 @@ public enum Replay {
     /// by substituting `://api.` with `://app.`. Self-hosted
     /// customers' hosts work unchanged.
     ///
-    /// Mirrors UXCam's `urlForCurrentSession()`.
+    /// Mirrors the reference mobile SDK's `urlForCurrentSession()`.
     public static func urlForCurrentSession() -> String? {
         LegacyCore.shared.urlForCurrentSession
     }
@@ -297,7 +297,7 @@ public enum Replay {
     /// sessions for the active distinctId), or nil when no
     /// `identify()` has been called yet.
     ///
-    /// Mirrors UXCam's `urlForCurrentUser()`.
+    /// Mirrors the reference mobile SDK's `urlForCurrentUser()`.
     public static func urlForCurrentUser() -> String? {
         LegacyCore.shared.urlForCurrentUser
     }
@@ -307,7 +307,7 @@ public enum Replay {
     /// from `track` event properties which only attach to a single
     /// event.
     ///
-    /// Mirrors UXCam's `setUserProperty(_:, _:)` per-primitive
+    /// Mirrors the reference mobile SDK's `setUserProperty(_:, _:)` per-primitive
     /// overloads — Swift's `Any?` subsumes them.
     ///
     /// Common use: `Replay.setUserProperty("plan", value: "pro")`
@@ -328,7 +328,7 @@ public enum Replay {
     }
 
     // -----------------------------------------------------------------
-    //  UXCam-parity session-control surface
+    //  industry-standard session-control surface
     // -----------------------------------------------------------------
 
     /// Toggle the UIViewController.viewDidAppear auto-tagger on/off
@@ -337,7 +337,7 @@ public enum Replay {
     /// for a flow where VC class names don't map cleanly to
     /// user-meaningful screens.
     ///
-    /// Mirrors UXCam's `setAutomaticScreenNameTagging(_:)`.
+    /// Mirrors the reference mobile SDK's `setAutomaticScreenNameTagging(_:)`.
     public static func setAutomaticScreenNameTagging(_ enabled: Bool) {
         LegacyCore.shared.setAutomaticScreenNameTagging(enabled)
     }
@@ -347,7 +347,7 @@ public enum Replay {
     /// a Firebase token. Dashboard wiring (chip on player header)
     /// tracked separately.
     ///
-    /// Mirrors UXCam's `setPushNotificationToken(_:)`.
+    /// Mirrors the reference mobile SDK's `setPushNotificationToken(_:)`.
     public static func setPushNotificationToken(
         _ token: String,
         platform: String = "apns"
@@ -359,7 +359,7 @@ public enum Replay {
     /// "starred sessions" filter on the dashboard. One-shot — call
     /// once per session you want flagged.
     ///
-    /// Mirrors UXCam's `markSessionAsFavorite()`.
+    /// Mirrors the reference mobile SDK's `markSessionAsFavorite()`.
     public static func markSessionAsFavorite() {
         LegacyCore.shared.markSessionAsFavorite()
     }
@@ -369,7 +369,7 @@ public enum Replay {
     /// which is event-level. Use for "this session is in A/B variant
     /// X" or "this session belongs to the holiday checkout flow".
     ///
-    /// Mirrors UXCam's `addTagWithProperties(_:properties:)`.
+    /// Mirrors the reference mobile SDK's `addTagWithProperties(_:properties:)`.
     public static func addTagWithProperties(
         _ name: String,
         properties: [String: Any]? = nil
@@ -383,7 +383,7 @@ public enum Replay {
     /// flows. Drains the old session's events first so they don't
     /// bleed into the new one.
     ///
-    /// Mirrors UXCam's `startNewSession()`.
+    /// Mirrors the reference mobile SDK's `startNewSession()`.
     public static func startNewSession() {
         LegacyCore.shared.startNewSession()
     }
@@ -440,7 +440,7 @@ public enum Replay {
     /// added windows AFTER the flag flips, so non-users pay zero
     /// overhead.
     ///
-    /// Mirrors UXCam's `enableAdvancedGestureRecognizer(_:)`.
+    /// Mirrors the reference mobile SDK's `enableAdvancedGestureRecognizer(_:)`.
     public static func enableAdvancedGestureRecognizer(_ enabled: Bool) {
         LegacyCore.shared.setAdvancedGesturesEnabled(enabled)
     }
@@ -449,7 +449,7 @@ public enum Replay {
     /// WITHOUT ending the session. The same session resumes when
     /// the user returns. Default off.
     ///
-    /// Mirrors UXCam's `allowShortBreakForAnotherApp(_:)`.
+    /// Mirrors the reference mobile SDK's `allowShortBreakForAnotherApp(_:)`.
     public static func allowShortBreakForAnotherApp(
         _ allow: Bool,
         windowSeconds: TimeInterval = 30
@@ -461,7 +461,7 @@ public enum Replay {
     /// only ONE session fires per process — subsequent
     /// foregroundings after a session_end are no-ops. Default true.
     ///
-    /// Mirrors UXCam's `setMultiSessionRecord(_:)`.
+    /// Mirrors the reference mobile SDK's `setMultiSessionRecord(_:)`.
     public static func setMultiSessionRecord(_ enabled: Bool) {
         LegacyCore.shared.setMultiSessionRecord(enabled)
     }
@@ -477,7 +477,7 @@ public enum Replay {
     /// One-shot per process.
     ///
     /// Returns a token used to remove the listener later. Mirrors
-    /// UXCam's `addVerificationListener(VerificationListener)`.
+    /// the reference mobile SDK's `addVerificationListener(VerificationListener)`.
     @discardableResult
     public static func addVerificationListener(_ listener: @escaping () -> Void) -> UUID {
         return LegacyCore.shared.addVerificationListener(listener)
@@ -494,7 +494,7 @@ public enum Replay {
     /// fires so the report timestamp ships with the screen the
     /// user was looking at.
     ///
-    /// Mirrors UXCam's `reportBugEvent(name:description:)`.
+    /// Mirrors the reference mobile SDK's `reportBugEvent(name:description:)`.
     public static func reportBugEvent(
         _ name: String,
         description: String? = nil,
@@ -513,7 +513,7 @@ public enum Replay {
     /// flow when you want strong-delivery semantics. Caps the wait
     /// so a wedged network can't hang the host app.
     ///
-    /// Mirrors UXCam's `stopApplicationAndUploadData()`. Default
+    /// Mirrors the reference mobile SDK's `stopApplicationAndUploadData()`. Default
     /// timeout 5s.
     public static func stopApplicationAndUploadData(timeoutSeconds: TimeInterval = 5) {
         LegacyCore.shared.stopApplicationAndUploadData(timeoutSeconds: timeoutSeconds)

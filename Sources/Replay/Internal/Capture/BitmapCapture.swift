@@ -10,7 +10,7 @@ import UIKit
 /// modern Apple API for snapshotting a rendered view. Same call
 /// the OS uses for share-sheet thumbnails, AirDrop previews, etc.
 /// Handles SwiftUI host views, hardware-accelerated layers, video
-/// content, WKWebView — all out of the box (UXCam doesn't have to
+/// content, WKWebView — all out of the box (the reference mobile SDK doesn't have to
 /// composite SurfaceViews separately the way Android does).
 ///
 /// Sync, main-thread. Encode + hash happen on background dispatch
@@ -59,7 +59,7 @@ enum BitmapCapture {
         // block — keeps the block focused on draw operations. The
         // registry call walks the weak table once.
         //
-        // UXCam-parity bulk-privacy semantics:
+        // industry-standard bulk-privacy semantics:
         //   - occludeAllScreen overrides everything: a single full-
         //     bounds rect → the whole snapshot gets the stripe
         //     overlay so no customer pixels survive.

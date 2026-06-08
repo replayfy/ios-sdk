@@ -15,7 +15,7 @@ import ObjectiveC.runtime
 ///   - `NotificationCenter` for `UIWindowSceneActivationDidChange`
 ///     only fires on app-level transitions, not per-VC navigation.
 ///   - Swizzling viewDidAppear is what every iOS analytics SDK does
-///     (UXCam, Mixpanel, Amplitude, Sentry, Datadog) because it's
+///     (the reference mobile SDK, Mixpanel, Amplitude, Sentry, Datadog) because it's
 ///     the ONE hook that fires for every visible-screen change
 ///     regardless of presentation style.
 ///

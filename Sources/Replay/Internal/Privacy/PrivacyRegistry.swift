@@ -18,7 +18,7 @@ import UIKit
 /// automatically.
 ///
 /// Singleton because the public ``Replay.addPrivacyView`` API is
-/// static (matches UXCam + the Android SDK pattern). One registry
+/// static (matches the reference mobile SDK + the Android SDK pattern). One registry
 /// per process.
 final class PrivacyRegistry {
 
@@ -34,10 +34,10 @@ final class PrivacyRegistry {
     #endif
 
     // -----------------------------------------------------------------
-    //  Bulk-privacy flags (UXCam parity)
+    //  Bulk-privacy flags (the reference mobile SDK parity)
     // -----------------------------------------------------------------
     //
-    // UXCam ships three opt-in switches that occlude broad classes of
+    // the reference mobile SDK ships three opt-in switches that occlude broad classes of
     // views without per-view registration:
     //
     //   occludeAllTextFields  → every UITextField / UITextView is
@@ -56,7 +56,7 @@ final class PrivacyRegistry {
     var occludeAllScreen: Bool = false
 
     // -----------------------------------------------------------------
-    //  Per-class occlusion (UXCam applyOcclusion / removeOcclusion)
+    //  Per-class occlusion (the reference mobile SDK applyOcclusion / removeOcclusion)
     // -----------------------------------------------------------------
     //
     // Customers can register arbitrary UIView subclasses; every
@@ -172,7 +172,7 @@ final class PrivacyRegistry {
         // Bulk class-based occlusion. UITextField + UITextView are
         // input controls; UILabel is read-only display text. The
         // wantText* flags target each set independently to match
-        // UXCam's API surface (customers can hide JUST the inputs
+        // the reference mobile SDK's API surface (customers can hide JUST the inputs
         // without redacting labels + buttons).
         if occludeAllTextFields,
            view is UITextField || view is UITextView {

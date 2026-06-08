@@ -18,9 +18,9 @@ import Foundation
 /// Stored in UserDefaults (sync; durable across launches, lives in
 /// the app's standard backup-eligible container). Defaults are
 /// **opted in** for both flags — customers MUST take action to opt
-/// out, matching UXCam's semantics + most analytics SDKs.
+/// out, matching the reference mobile SDK's semantics + most analytics SDKs.
 ///
-/// Mirrors UXCam's `optOutOverall(bool)` + `optOutOfSchematicRecordings(bool)`
+/// Mirrors the reference mobile SDK's `optOutOverall(bool)` + `optOutOfSchematicRecordings(bool)`
 /// APIs. Read by ``LegacyCore`` at the top of every emit / capture
 /// path so flips take effect on the next event without waiting for
 /// a process restart.
