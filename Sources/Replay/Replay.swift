@@ -15,11 +15,23 @@ import UIKit
 /// modern Swift idioms (lowercase methods, structured concurrency,
 /// optional params) while keeping the underlying capabilities the same.
 ///
-/// Foundation v0: ``start(with:)`` + ``identify(_:properties:)`` +
-/// ``track(_:properties:)`` + ``stop()`` + ``isRecording``. The rest
-/// (``tagScreenName(_:)``, ``addPrivacyView(_:)``, ``pauseRecording()``,
-/// ``resumeRecording()``, ``cancelSession()``) ship as stubs that log
-/// + no-op until their respective engines land in follow-up commits.
+/// Foundation: ``start(with:)`` + ``identify(_:properties:)`` +
+/// ``track(_:properties:)`` + ``stop()`` + ``isRecording`` — all live on the
+/// active recording engine (``ReplayCore``).
+///
+/// ⚠️ **Stubbed facade methods.** A handful of public methods still delegate
+/// to the legacy engine (``LegacyCore``), which ``start(with:)`` no longer
+/// boots — so on a live session they are no-ops (or return nil). They are
+/// kept on the public surface for source-compatibility and will be re-homed
+/// onto ``ReplayCore`` (or backed by new engine features) in the
+/// engine-consolidation follow-up. Each is marked `⚠️ STUB` at its
+/// definition; see `docs/sdk-facade-status.md` for the canonical list:
+///   - ``cancelSession()``
+///   - ``optOutOfSchematicRecordings(_:)`` / ``isOptedOutOfSchematicRecordings``
+///   - ``urlForCurrentSession()`` / ``urlForCurrentUser()``
+///   - ``enableAdvancedGestureRecognizer(_:)``
+///   - ``allowShortBreakForAnotherApp(_:windowSeconds:)``
+///   - ``setMultiSessionRecord(_:)``
 public enum Replay {
 
     /// Initialize the SDK and start recording. Call once per process
@@ -199,22 +211,43 @@ public enum Replay {
         PrivacyRegistry.shared.occludeAllScreen = occlude
     }
 
-    /// Paint the diagonal-stripe overlay over a set of `CGRect`
-    /// regions on the NEXT snapshot only. Entry point for
-    /// cross-platform SDK bridges (React Native, Flutter) whose
-    /// components don't have native `UIView` references — the
-    /// bridge calculates rects on the JS / Dart side
-    /// (RN `measureInWindow`, Flutter `RenderBox.localToGlobal`)
-    /// and hands them here in root-relative points.
+    /// Mask a set of `CGRect` regions on the NEXT snapshot only. Entry point
+    /// for cross-platform SDK bridges (React Native, Flutter) whose components
+    /// don't have native `UIView` references — the bridge calculates rects on
+    /// the JS / Dart side (RN `measureInWindow`, Flutter
+    /// `RenderBox.localToGlobal`) and hands them here in root-relative points.
+    /// Rendered with the current global ``setMaskStyle(_:)``.
     ///
-    /// One-shot: the rects clear once a snapshot fires. Bridges
-    /// call this every frame (or before any capture they want
-    /// occluded). Calling it again without a snapshot in between
-    /// REPLACES (does not append to) the prior set.
+    /// One-shot: the rects clear once a snapshot fires. Bridges call this every
+    /// frame (or before any capture they want occluded). Calling it again
+    /// without a snapshot in between REPLACES (does not append to) the prior
+    /// set.
     ///
     /// Mirrors the reference mobile SDK's `occludeRectsOnNextFrame(rects)`.
     public static func occludeRectsOnNextFrame(_ rects: [CGRect]) {
-        PrivacyRegistry.shared.setPendingFrameRects(rects)
+        occludeRectsOnNextFrame(rects, style: PrivacyRegistry.shared.maskStyle)
+    }
+
+    /// As ``occludeRectsOnNextFrame(_:)`` but with an explicit render style for
+    /// every rect in this set.
+    public static func occludeRectsOnNextFrame(_ rects: [CGRect],
+                                               style: ReplayMaskStyle) {
+        PrivacyRegistry.shared.setPendingFrameRects(
+            rects.map { MaskRect(rect: $0, style: style) })
+    }
+
+    /// The default render style for masked regions — `.blur` Gaussian-blurs
+    /// the pixels, `.overlay` paints a solid box. Applies to `addPrivacyView`,
+    /// `occludeAllTextFields`, secure fields, the whole-screen overlay, and any
+    /// `occludeRectsOnNextFrame` call that doesn't pass its own style. Default
+    /// `.blur`.
+    public static func setMaskStyle(_ style: ReplayMaskStyle) {
+        PrivacyRegistry.shared.maskStyle = style
+    }
+
+    /// Gaussian blur radius for `.blur` regions (default 8). Larger = stronger.
+    public static func setBlurRadius(_ radius: Double) {
+        PrivacyRegistry.shared.blurRadius = max(0, radius)
     }
     #endif
 
@@ -245,6 +278,8 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `cancelCurrentSession()`.
     public static func cancelSession() {
+        // ⚠️ STUB — LegacyCore isn't booted by start(); this does NOT cancel
+        // the live ReplayCore session. See docs/sdk-facade-status.md.
         LegacyCore.shared.cancelCurrentSession()
     }
 
@@ -281,11 +316,16 @@ public enum Replay {
     /// Mirrors the reference mobile SDK's `optOutOfSchematicRecordings()` /
     /// `optIntoSchematicRecordings()`.
     public static func optOutOfSchematicRecordings(_ optOut: Bool) {
+        // ⚠️ STUB — sets a flag on the un-booted LegacyCore that the live
+        // engine never reads; pixel capture is unaffected. See
+        // docs/sdk-facade-status.md.
         LegacyCore.shared.setSchematicOptOut(optOut)
     }
 
     /// Whether schematic (snapshot) recording is currently opted out.
     public static var isOptedOutOfSchematicRecordings: Bool {
+        // ⚠️ STUB — reads the inert LegacyCore flag (see
+        // optOutOfSchematicRecordings). docs/sdk-facade-status.md.
         LegacyCore.shared.isSchematicOptedOut
     }
 
@@ -300,6 +340,9 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `urlForCurrentSession()`.
     public static func urlForCurrentSession() -> String? {
+        // ⚠️ STUB — derived from the un-booted LegacyCore's (nonexistent)
+        // session, so returns nil for live sessions. Re-home onto
+        // ReplayCore.sessionID + apiHost. See docs/sdk-facade-status.md.
         LegacyCore.shared.urlForCurrentSession
     }
 
@@ -309,6 +352,8 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `urlForCurrentUser()`.
     public static func urlForCurrentUser() -> String? {
+        // ⚠️ STUB — see urlForCurrentSession; nil for live sessions.
+        // docs/sdk-facade-status.md.
         LegacyCore.shared.urlForCurrentUser
     }
 
@@ -478,6 +523,8 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `enableAdvancedGestureRecognizer(_:)`.
     public static func enableAdvancedGestureRecognizer(_ enabled: Bool) {
+        // ⚠️ STUB — needs an advanced-gesture recognizer in the live engine;
+        // the LegacyCore flag is inert. See docs/sdk-facade-status.md.
         LegacyCore.shared.setAdvancedGesturesEnabled(enabled)
     }
 
@@ -490,6 +537,8 @@ public enum Replay {
         _ allow: Bool,
         windowSeconds: TimeInterval = 30
     ) {
+        // ⚠️ STUB — needs session-resume-window logic in the live engine; the
+        // LegacyCore flag is inert. See docs/sdk-facade-status.md.
         LegacyCore.shared.setAllowShortBreak(allow, windowSeconds: windowSeconds)
     }
 
@@ -499,6 +548,8 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `setMultiSessionRecord(_:)`.
     public static func setMultiSessionRecord(_ enabled: Bool) {
+        // ⚠️ STUB — needs multi-session lifecycle in the live engine; the
+        // LegacyCore flag is inert. See docs/sdk-facade-status.md.
         LegacyCore.shared.setMultiSessionRecord(enabled)
     }
 

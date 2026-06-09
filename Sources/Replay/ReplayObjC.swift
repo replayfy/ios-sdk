@@ -210,6 +210,27 @@ public final class ReplayBridge: NSObject {
         let unboxed = rects.map { $0.cgRectValue }
         Replay.occludeRectsOnNextFrame(unboxed)
     }
+
+    /// `[Replay occludeRectsOnNextFrame: rects styles: styles]` — per-rect
+    /// render styles (0 blur, 1 overlay), parallel to `rects`. RN / Flutter
+    /// pass boxed NSValue rects + NSNumber styles so each masked widget keeps
+    /// its own style in a single one-shot set.
+    @objc(occludeRectsOnNextFrame:styles:)
+    public static func occludeRectsOnNextFrame(_ rects: [NSValue],
+                                               styles: [NSNumber]) {
+        let maskRects = rects.enumerated().map { i, boxed -> MaskRect in
+            let raw = i < styles.count ? styles[i].intValue : 0
+            return MaskRect(rect: boxed.cgRectValue,
+                            style: ReplayMaskStyle(rawValue: raw) ?? .blur)
+        }
+        PrivacyRegistry.shared.setPendingFrameRects(maskRects)
+    }
+
+    /// `[Replay setMaskStyle: 0]` — 0 blur, 1 overlay.
+    @objc(setMaskStyle:)
+    public static func setMaskStyle(_ style: Int) {
+        Replay.setMaskStyle(ReplayMaskStyle(rawValue: style) ?? .blur)
+    }
     #endif
 
     /// `[Replay pauseRecording]`
