@@ -64,6 +64,14 @@ public final class ReplayCore {
     /// Wired to the privacy registry by the host SDK.
     public var privacyRectsProvider: () -> [CGRect] = { [] }
 
+    /// Additional host-supplied rects, composed into `privacyRectsProvider`
+    /// by `start`. Unlike `privacyRectsProvider` (which `start` assigns once
+    /// the session opens), this is owned by the host and never overwritten —
+    /// the integration point for hosts that compute occlusion off the UIKit
+    /// tree (React Native / Flutter, which feed it window-point rects pulled
+    /// from JS/Dart). Empty by default.
+    public var externalPrivacyRectsProvider: () -> [CGRect] = { [] }
+
     private init() {}
 
     public func start(config: ReplayConfig) {
@@ -113,7 +121,10 @@ public final class ReplayCore {
                 // secure text fields all register correctly but never reach
                 // the JPEGs. Resolved once per frame on the capture (main)
                 // thread, so the UIKit view-tree walk is safe.
-                self.privacyRectsProvider = { PrivacyRegistry.shared.windowPrivacyBounds() }
+                self.privacyRectsProvider = {
+                    PrivacyRegistry.shared.windowPrivacyBounds()
+                        + self.externalPrivacyRectsProvider()
+                }
 
                 let collector = MobileCollector(transport: transport)
                 let screenshots = MobileScreenshots(transport: transport, privacyRects: { self.privacyRectsProvider() })
