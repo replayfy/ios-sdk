@@ -105,7 +105,13 @@ final class CrashHandler {
                         kind: "crash",
                         detail: oneLineSummary,
                         stack: formatted,
-                        timestamp: Int64(report.systemInfo.timestamp.timeIntervalSince1970 * 1_000)
+                        timestamp: Int64(report.systemInfo.timestamp.timeIntervalSince1970 * 1_000),
+                        // True when the crash originated from an uncaught
+                        // Obj-C exception (PLCrashReporter captures the
+                        // NSException name/reason). Consumers that ALSO run an
+                        // in-process NSException handler use this to skip the
+                        // recovered duplicate and emit only signal/EXC crashes.
+                        isException: report.exceptionInfo != nil
                     ))
                 }
             } catch {
@@ -172,7 +178,8 @@ final class CrashHandler {
             kind: kind,
             detail: signalOrName,
             stack: nil,
-            timestamp: ts
+            timestamp: ts,
+            isException: false
         ))
     }
 
@@ -207,4 +214,8 @@ struct CrashRecord {
     let stack: String?
     /// Wall-clock ms at crash time.
     let timestamp: Int64
+    /// True when the crash came from an uncaught Obj-C exception (vs a
+    /// signal/EXC). The live engine also catches NSExceptions in-process, so
+    /// it skips the recovered duplicate and emits only signal/EXC crashes.
+    let isException: Bool
 }

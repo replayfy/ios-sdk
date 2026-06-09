@@ -20,6 +20,10 @@ public final class ReplayCore {
     private var screenshots: MobileScreenshots?
     private let touch = MobileTouchCapture()
     private var perf: MobilePerfMonitor?
+    // PLCrashReporter handler for signal/EXC crashes — recorded in-process and
+    // recovered + emitted through the live wire on the NEXT launch. Retained so
+    // it (and the underlying reporter) isn't released.
+    private var crashHandler: CrashHandler?
     // Live-presence socket (mirrors the web SDK's presence.ts): keeps this
     // session on the dashboard's online list for its lifetime; the backend
     // LiveGateway flips the EndUser online on connect / offline ~10s after
@@ -155,8 +159,33 @@ public final class ReplayCore {
                 }
                 perf.start()
                 self.perf = perf
-                // Uncaught-exception crash reporting.
+                // Crash reporting. Two complementary handlers:
+                //   1. PLCrashReporter (signal/EXC: SIGSEGV, EXC_BAD_ACCESS,
+                //      force-unwrap, fatalError, …) — recorded in-process,
+                //      drained + emitted through the live wire on the NEXT
+                //      launch. NSException-derived reports carry exceptionInfo
+                //      and are skipped here, because:
+                //   2. MobileCrashHandler catches uncaught NSExceptions
+                //      in-process THIS session (installed last so it owns the
+                //      ObjC uncaught handler). Together they cover every crash
+                //      class with no duplicate.
                 if config.captureErrors {
+                    let crash = CrashHandler { [weak self] record in
+                        // Skip the NSException path — MobileCrashHandler reports
+                        // those in-process (below). PLCrashReporter also catches
+                        // the resulting abort(): sometimes WITH exceptionInfo
+                        // (isException), sometimes as a bare SIGABRT (detail).
+                        // Skip both. Trade-off: a pure abort()/assert SIGABRT
+                        // (no NSException) isn't captured; the dominant classes
+                        // (SIGSEGV/SIGBUS/SIGILL/SIGTRAP/EXC_BAD_ACCESS) are.
+                        guard !record.isException, record.detail != "SIGABRT"
+                        else { return }
+                        self?.sendCrash(name: record.detail, reason: "",
+                                        stacktrace: record.stack ?? record.detail)
+                    }
+                    crash.install()
+                    self.crashHandler = crash
+
                     MobileCrashHandler.install { [weak self] name, reason, stack in
                         self?.sendCrash(name: name, reason: reason, stacktrace: stack)
                     }
