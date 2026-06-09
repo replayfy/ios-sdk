@@ -60,9 +60,9 @@ public final class ReplayCore {
     // Onboarding/verification callbacks, fired when /start succeeds.
     private var verificationListeners: [UUID: () -> Void] = [:]
 
-    /// Sensitive window-coordinate rects to mask in screenshots.
-    /// Wired to the privacy registry by the host SDK.
-    public var privacyRectsProvider: () -> [CGRect] = { [] }
+    /// Sensitive window-coordinate rects (each with its render style) to mask
+    /// in screenshots. Wired to the privacy registry by the host SDK.
+    public var privacyRectsProvider: () -> [MaskRect] = { [] }
 
     /// Additional host-supplied rects, composed into `privacyRectsProvider`
     /// by `start`. Unlike `privacyRectsProvider` (which `start` assigns once
@@ -70,7 +70,7 @@ public final class ReplayCore {
     /// the integration point for hosts that compute occlusion off the UIKit
     /// tree (React Native / Flutter, which feed it window-point rects pulled
     /// from JS/Dart). Empty by default.
-    public var externalPrivacyRectsProvider: () -> [CGRect] = { [] }
+    public var externalPrivacyRectsProvider: () -> [MaskRect] = { [] }
 
     private init() {}
 

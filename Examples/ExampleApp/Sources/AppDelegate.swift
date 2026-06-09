@@ -29,6 +29,35 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         )
         NSLog("[ReplayExample] Replay.start dispatched — see ReplaySdk-tagged logs")
 
+        // Headless crash-test hook. Launch with
+        //   SIMCTL_CHILD_REPLAY_AUTOCRASH=nsexception (or =signal)
+        //   xcrun simctl launch <udid> <bundle-id>
+        // to fire a crash ~6s after start (enough for the session to
+        // register + the first frames/events to flow) without a UI tap.
+        //   nsexception → caught in-process by MobileCrashHandler →
+        //                 MobileWire.crash + flushBlocking (same session).
+        //   signal      → SIGSEGV; PLCrashReporter records it, recovered +
+        //                 emitted on the NEXT launch.
+        if let mode = ProcessInfo.processInfo.environment["REPLAY_AUTOCRASH"],
+           !mode.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                NSLog("[ReplayExample] auto-crash: \(mode)")
+                switch mode {
+                case "signal":
+                    // Null-pointer write → SIGSEGV / EXC_BAD_ACCESS.
+                    UnsafeMutablePointer<Int>(bitPattern: 0x1)!.pointee = 42
+                case "nsexception":
+                    fallthrough
+                default:
+                    NSException(
+                        name: NSExceptionName("ReplayAutoCrash"),
+                        reason: "Headless auto-crash: \(mode)",
+                        userInfo: nil
+                    ).raise()
+                }
+            }
+        }
+
         let window = UIWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UINavigationController(rootViewController: MainViewController())
         window.makeKeyAndVisible()

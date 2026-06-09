@@ -56,6 +56,20 @@ final class PrivacyRegistry {
     var occludeAllScreen: Bool = false
 
     // -----------------------------------------------------------------
+    //  Mask render style (the reference's occlusion types)
+    // -----------------------------------------------------------------
+    //
+    // The default render style for every masked region that doesn't carry its
+    // own (addPrivacyView, occludeAll*, applyOcclusion, secure fields, the
+    // whole-screen overlay). `.blur` Gaussian-blurs the pixels; `.overlay`
+    // paints a solid box. Per-region styles (React Native / Flutter mask
+    // widgets) override this on their own rects.
+
+    var maskStyle: ReplayMaskStyle = .blur
+    /// Gaussian blur radius applied to `.blur` regions.
+    var blurRadius: Double = 8
+
+    // -----------------------------------------------------------------
     //  Per-class occlusion (the reference mobile SDK applyOcclusion / removeOcclusion)
     // -----------------------------------------------------------------
     //
@@ -128,17 +142,18 @@ final class PrivacyRegistry {
     // REPLACES (does not append to) the prior set.
 
     private let pendingRectsLock = NSLock()
-    private var pendingFrameRects: [CGRect] = []
+    private var pendingFrameRects: [MaskRect] = []
 
     /// Bridge entry point — set the rects to paint on the next
-    /// snapshot. Replaces any prior pending set.
-    func setPendingFrameRects(_ rects: [CGRect]) {
+    /// snapshot. Replaces any prior pending set. Each rect carries its own
+    /// render style (the host's mask widget chooses blur vs overlay).
+    func setPendingFrameRects(_ rects: [MaskRect]) {
         pendingRectsLock.withLock { pendingFrameRects = rects }
     }
 
     /// Snapshot + clear atomically so we never paint the same rect
     /// twice. Called by BitmapCapture once per capture.
-    func consumePendingFrameRects() -> [CGRect] {
+    func consumePendingFrameRects() -> [MaskRect] {
         return pendingRectsLock.withLock {
             let snapshot = pendingFrameRects
             pendingFrameRects = []
@@ -310,19 +325,22 @@ final class PrivacyRegistry {
     /// `occludeSensitiveScreen` short-circuits to a single window-sized
     /// rect so no pixel survives. Must be called on the main thread
     /// (it touches UIKit) — the screenshotter's capture runs there.
-    func windowPrivacyBounds() -> [CGRect] {
+    func windowPrivacyBounds() -> [MaskRect] {
         guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow })
             ?? UIApplication.shared.windows.first
         else { return [] }
+        let style = maskStyle
         if occludeAllScreen {
             // Drain pending bridge rects even on the full-screen path so
             // they don't carry into a later non-full-screen frame.
             _ = consumePendingFrameRects()
-            return [window.bounds]
+            return [MaskRect(rect: window.bounds, style: style)]
         }
-        return sensitiveBounds(within: window) +
-               bulkBounds(within: window) +
-               consumePendingFrameRects()
+        // Native/bulk sources render with the global style; the bridge rects
+        // (React Native / Flutter) carry their own per-region style.
+        let native = (sensitiveBounds(within: window) + bulkBounds(within: window))
+            .map { MaskRect(rect: $0, style: style) }
+        return native + consumePendingFrameRects()
     }
 
     /// Wipe the registry. Used on opt-out / SDK stop.

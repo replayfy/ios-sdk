@@ -76,7 +76,7 @@ enum BitmapCapture {
             }
             return PrivacyRegistry.shared.sensitiveBounds(within: view) +
                    PrivacyRegistry.shared.bulkBounds(within: view) +
-                   PrivacyRegistry.shared.consumePendingFrameRects()
+                   PrivacyRegistry.shared.consumePendingFrameRects().map { $0.rect }
         }()
 
         // Hardware-surface plans: MTKView / CAMetalLayer /

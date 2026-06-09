@@ -10,7 +10,7 @@ import CoreImage
 /// frames archive once `batchSize` frames have been collected.
 final class MobileScreenshots {
     private let transport: MobileTransport
-    private let privacy: () -> [CGRect] // sensitive rects in window coords
+    private let privacy: () -> [MaskRect] // sensitive rects + style, window coords
 
     private var timer: Timer?
     private let lock = NSLock()
@@ -23,7 +23,7 @@ final class MobileScreenshots {
     private let batchSize = 20
     private let maxBuffered = 500
 
-    init(transport: MobileTransport, privacyRects: @escaping () -> [CGRect]) {
+    init(transport: MobileTransport, privacyRects: @escaping () -> [MaskRect]) {
         self.transport = transport
         self.privacy = privacyRects
     }
@@ -83,10 +83,9 @@ final class MobileScreenshots {
             guard let ctx = UIGraphicsGetCurrentContext() else { return }
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
 
-            // Mask sensitive regions the reference way: blur the underlying
-            // content, then overlay diagonal stripes (Android's capture
-            // pipeline paints the matching stripe pattern). Grab the clean
-            // render once so every region blurs the real pixels, not a
+            // Mask sensitive regions per their style — `.blur` Gaussian-blurs
+            // the underlying pixels, `.overlay` paints a solid box. Grab the
+            // clean render once so every blur samples the real pixels, not a
             // region we already masked this pass.
             let rects = privacy()
             if !rects.isEmpty,
@@ -109,51 +108,83 @@ final class MobileScreenshots {
     // ── Privacy masking ──────────────────────────────────────────────
     private static let ciContext = CIContext(options: nil)
 
-    /// Blur + diagonal-stripe overlay for each sensitive rect (window/point
-    /// coords). Mirrors the reference's iOS privacy render. The rendered
-    /// source is in pixel coords, so scale the rect by screenScale to sample
-    /// the right region.
-    private func maskRegions(_ rects: [CGRect], from rendered: CGImage, in ctx: CGContext) {
-        let stripeWidth: CGFloat = 5.0
-        let stripeSpacing: CGFloat = 15.0
-        let stripeColor = UIColor.gray.withAlphaComponent(0.7)
-        for frame in rects {
-            let cropFrame = CGRect(
-                x: frame.origin.x * screenScale,
-                y: frame.origin.y * screenScale,
-                width: frame.size.width * screenScale,
-                height: frame.size.height * screenScale
-            )
-            guard let region = rendered.cropping(to: cropFrame),
-                  let blurred = blurredRegion(region) else { continue }
-            blurred.draw(in: frame)
-
-            ctx.saveGState()
-            UIRectClip(frame)
-            let totalHeight = frame.size.height
-            for x in stride(from: -totalHeight, to: frame.size.width,
-                            by: stripeSpacing + stripeWidth) {
-                ctx.move(to: CGPoint(x: x + frame.minX, y: frame.minY))
-                ctx.addLine(to: CGPoint(x: x + totalHeight + frame.minX,
-                                        y: totalHeight + frame.minY))
+    /// Render each sensitive rect per its style (window/point coords):
+    ///   • `.blur`     — Gaussian-blur the underlying pixels (configurable
+    ///     radius). The rendered source is in pixel coords, so scale the rect
+    ///     by screenScale to sample the right region.
+    ///   • `.overlay`  — paint a solid box; no source pixel survives. Cleaner
+    ///     than the old stripe texture on screens full of fields.
+    ///   • `.pixelate` — reduce the region to coarse mosaic blocks via
+    ///     `CIPixellate`. Same crop-the-clean-source path as `.blur`.
+    private func maskRegions(_ rects: [MaskRect], from rendered: CGImage, in ctx: CGContext) {
+        let radius = CGFloat(PrivacyRegistry.shared.blurRadius)
+        let overlayColor = UIColor(white: 0.22, alpha: 1.0)
+        for item in rects {
+            let frame = item.rect
+            guard frame.width > 0, frame.height > 0 else { continue }
+            switch item.style {
+            case .overlay:
+                ctx.saveGState()
+                overlayColor.setFill()
+                ctx.fill(frame)
+                ctx.restoreGState()
+            case .blur, .pixelate:
+                let cropFrame = CGRect(
+                    x: frame.origin.x * screenScale,
+                    y: frame.origin.y * screenScale,
+                    width: frame.size.width * screenScale,
+                    height: frame.size.height * screenScale
+                )
+                guard let region = rendered.cropping(to: cropFrame) else { continue }
+                let masked = item.style == .pixelate
+                    ? pixelatedRegion(region, blockSize: max(8, radius * 2))
+                    : blurredRegion(region, radius: radius)
+                guard let masked else { continue }
+                masked.draw(in: frame)
             }
-            ctx.setLineWidth(stripeWidth)
-            stripeColor.setStroke()
-            ctx.strokePath()
-            ctx.restoreGState()
         }
     }
 
-    private func blurredRegion(_ cgImage: CGImage) -> UIImage? {
+    private func blurredRegion(_ cgImage: CGImage, radius: CGFloat) -> UIImage? {
         let ciImage = CIImage(cgImage: cgImage)
         guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
         filter.setValue(ciImage, forKey: kCIInputImageKey)
-        filter.setValue(2.5, forKey: kCIInputRadiusKey)
+        filter.setValue(radius, forKey: kCIInputRadiusKey)
         guard let output = filter.outputImage,
               let cg = MobileScreenshots.ciContext.createCGImage(
                 output, from: ciImage.extent)
         else { return nil }
         return UIImage(cgImage: cg, scale: screenScale, orientation: .up)
+    }
+
+    /// Coarse-mosaic a region via `CIPixellate`. `blockSize` is in source
+    /// (pixel) units; clamp the output to the input extent so the filter's
+    /// edge bleed doesn't shift the drawn region. Falls back to a solid box
+    /// if the filter is unavailable — never leave pixels exposed.
+    private func pixelatedRegion(_ cgImage: CGImage, blockSize: CGFloat) -> UIImage? {
+        let ciImage = CIImage(cgImage: cgImage)
+        guard let filter = CIFilter(name: "CIPixellate") else {
+            return solidRegion(size: ciImage.extent.size)
+        }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(blockSize, forKey: kCIInputScaleKey)
+        filter.setValue(
+            CIVector(x: ciImage.extent.midX, y: ciImage.extent.midY),
+            forKey: kCIInputCenterKey)
+        guard let output = filter.outputImage,
+              let cg = MobileScreenshots.ciContext.createCGImage(
+                output, from: ciImage.extent)
+        else { return solidRegion(size: ciImage.extent.size) }
+        return UIImage(cgImage: cg, scale: screenScale, orientation: .up)
+    }
+
+    private func solidRegion(size: CGSize) -> UIImage? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor(white: 0.22, alpha: 1.0).setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
     }
 
     func flush() {
