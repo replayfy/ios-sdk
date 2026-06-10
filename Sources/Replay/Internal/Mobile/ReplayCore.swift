@@ -139,11 +139,16 @@ public final class ReplayCore {
                 collector.start()
                 // captureSnapshotPixels=false → events only, no frames archive.
                 if config.captureSnapshotPixels { screenshots.start() }
-                self.touch.install { label, x, y, isSwipe, direction in
-                    if isSwipe {
-                        self.sendSwipe(label: label, x: x, y: y, direction: direction)
-                    } else {
-                        self.sendClick(label: label, x: x, y: y)
+                // Flutter hosts pass captureTouch:false — the Dart layer
+                // reports taps with the real widget label via reportInteraction
+                // (the native view-tree only ever sees the one FlutterView).
+                if config.captureTouch {
+                    self.touch.install { label, x, y, isSwipe, direction in
+                        if isSwipe {
+                            self.sendSwipe(label: label, x: x, y: y, direction: direction)
+                        } else {
+                            self.sendClick(label: label, x: x, y: y)
+                        }
                     }
                 }
                 // Screen tracking → viewComponent messages. Gated at emission
@@ -268,6 +273,17 @@ public final class ReplayCore {
     }
     func sendSwipe(label: String, x: UInt64, y: UInt64, direction: String) {
         enqueue(MobileWire.swipe(label: label, x: x, y: y, direction: direction, timestamp: nowMs()))
+    }
+    /// Entry point for host-reported interactions (the Flutter plugin's
+    /// Dart-side gesture capture). `kind` is "tap" / "long_press" / "swipe";
+    /// a long-press is recorded as a click (the dashboard keys gestures off the
+    /// label + coordinates), and swipes carry their direction.
+    public func reportInteraction(kind: String, label: String, x: UInt64, y: UInt64, direction: String) {
+        if kind == "swipe" {
+            sendSwipe(label: label, x: x, y: y, direction: direction)
+        } else {
+            sendClick(label: label, x: x, y: y)
+        }
     }
     func sendInput(value: String, masked: Bool, label: String) {
         enqueue(MobileWire.input(value: value, masked: masked, label: label, timestamp: nowMs()))

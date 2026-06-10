@@ -87,6 +87,13 @@ public struct ReplayConfig {
     /// builds whose dashboard isn't theirs).
     public let useRemoteConfig: Bool
 
+    /// Install the native view-tree touch capture. Default true. The Flutter
+    /// plugin sets this false: a Flutter app is a single `FlutterView`, so the
+    /// native hit-test can only ever label taps "FlutterView" — the Dart layer
+    /// captures taps with the real widget label instead and reports them via
+    /// `reportInteraction`, so native capture would only double-count.
+    public let captureTouch: Bool
+
     public init(
         apiKey: String,
         apiHost: String,
@@ -103,7 +110,8 @@ public struct ReplayConfig {
         captureSnapshotPixels: Bool = true,
         snapshotInterval: TimeInterval = 0.5,
         autoScreenName: Bool = true,
-        useRemoteConfig: Bool = true
+        useRemoteConfig: Bool = true,
+        captureTouch: Bool = true
     ) {
         self.apiKey = apiKey
         self.apiHost = apiHost
@@ -121,5 +129,6 @@ public struct ReplayConfig {
         self.snapshotInterval = snapshotInterval
         self.autoScreenName = autoScreenName
         self.useRemoteConfig = useRemoteConfig
+        self.captureTouch = captureTouch
     }
 }

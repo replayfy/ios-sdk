@@ -103,6 +103,27 @@ public enum Replay {
         #endif
     }
 
+    /// Report a host-captured interaction (used by the Flutter plugin's
+    /// Dart-side gesture capture, which knows the real widget label that the
+    /// native FlutterView hit-test cannot). `kind` ∈ "tap"/"long_press"/"swipe".
+    public static func reportInteraction(
+        kind: String,
+        label: String,
+        x: Int,
+        y: Int,
+        direction: String = ""
+    ) {
+        #if canImport(UIKit)
+        ReplayCore.shared.reportInteraction(
+            kind: kind,
+            label: label,
+            x: UInt64(max(0, x)),
+            y: UInt64(max(0, y)),
+            direction: direction
+        )
+        #endif
+    }
+
     /// Manually end the current session and force-upload the in-memory
     /// batch. The next foregrounding triggers a fresh session.
     ///
