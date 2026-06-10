@@ -279,10 +279,12 @@ public final class ReplayCore {
     /// a long-press is recorded as a click (the dashboard keys gestures off the
     /// label + coordinates), and swipes carry their direction.
     public func reportInteraction(kind: String, label: String, x: UInt64, y: UInt64, direction: String) {
-        if kind == "swipe" {
-            sendSwipe(label: label, x: x, y: y, direction: direction)
-        } else {
-            sendClick(label: label, x: x, y: y)
+        switch kind {
+        case "swipe": sendSwipe(label: label, x: x, y: y, direction: direction)
+        case "tap": sendClick(label: label, x: x, y: y)
+        default:
+            // long_press / double_tap / pinch → distinct gesture event.
+            enqueue(MobileWire.gesture(kind: kind, label: label, x: x, y: y, direction: direction, timestamp: nowMs()))
         }
     }
     func sendInput(value: String, masked: Bool, label: String) {

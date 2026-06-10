@@ -27,6 +27,7 @@ enum MobileMsgType: UInt64 {
     case networkCall = 105
     case swipe = 106
     case batchMeta = 107
+    case gesture = 108
     case graphQL = 109
 }
 
@@ -82,6 +83,13 @@ enum MobileWire {
     static func swipe(label: String, x: UInt64, y: UInt64, direction: String, timestamp: UInt64) -> Data {
         var b = Data(); b.writeString(label); b.writeUInt(x); b.writeUInt(y); b.writeString(direction)
         return message(.swipe, timestamp: timestamp, body: b)
+    }
+
+    /// Advanced gesture (long_press / double_tap / pinch). `kind` carries the
+    /// variant; body otherwise mirrors swipe so the backend reuses the reader.
+    static func gesture(kind: String, label: String, x: UInt64, y: UInt64, direction: String, timestamp: UInt64) -> Data {
+        var b = Data(); b.writeString(kind); b.writeString(label); b.writeUInt(x); b.writeUInt(y); b.writeString(direction)
+        return message(.gesture, timestamp: timestamp, body: b)
     }
 
     static func input(value: String, masked: Bool, label: String, timestamp: UInt64) -> Data {
