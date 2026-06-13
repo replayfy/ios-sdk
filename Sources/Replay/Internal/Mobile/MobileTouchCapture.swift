@@ -3,10 +3,15 @@ import UIKit
 import ObjectiveC
 
 /// Captures touches by swizzling `UIWindow.sendEvent`. On touch-end it
-/// classifies tap vs swipe (start→end distance > 10 pt) + direction,
-/// derives a label from the hit view, and forwards to the engine.
+/// classifies the gesture — swipe (start→end distance > 10 pt), long-press
+/// (held ≥ 0.5 s with little movement), else tap — derives a label from the
+/// hit view, and forwards to the engine.
 final class MobileTouchCapture {
-    typealias Handler = (_ label: String, _ x: UInt64, _ y: UInt64, _ isSwipe: Bool, _ direction: String) -> Void
+    /// `kind` is "tap" / "long_press" / "swipe".
+    typealias Handler = (_ label: String, _ x: UInt64, _ y: UInt64, _ kind: String, _ direction: String) -> Void
+
+    /// Press held at least this long (with little movement) → long_press.
+    private static let longPressThreshold: CFTimeInterval = 0.5
 
     private static var handler: Handler?
     private static var swizzled = false
@@ -34,16 +39,23 @@ final class MobileTouchCapture {
             let id = ObjectIdentifier(touch)
             switch touch.phase {
             case .began:
-                starts[id] = touch.location(in: window)
+                starts[id] = (touch.location(in: window), CACurrentMediaTime())
             case .ended:
                 let end = touch.location(in: window)
-                let start = starts[id] ?? end
+                let (start, t0) = starts[id] ?? (end, CACurrentMediaTime())
                 starts[id] = nil
                 let dx = end.x - start.x, dy = end.y - start.y
-                let isSwipe = hypot(dx, dy) > 10
+                let kind: String
+                if hypot(dx, dy) > 10 {
+                    kind = "swipe"
+                } else if CACurrentMediaTime() - t0 >= longPressThreshold {
+                    kind = "long_press"
+                } else {
+                    kind = "tap"
+                }
                 let label = describe(touch.view)
                 let x = UInt64(max(end.x, 0)), y = UInt64(max(end.y, 0))
-                handler(label, x, y, isSwipe, direction(dx, dy))
+                handler(label, x, y, kind, direction(dx, dy))
             case .cancelled:
                 starts[id] = nil
             default: break
@@ -51,7 +63,7 @@ final class MobileTouchCapture {
         }
     }
 
-    private static var starts: [ObjectIdentifier: CGPoint] = [:]
+    private static var starts: [ObjectIdentifier: (CGPoint, CFTimeInterval)] = [:]
 
     private static func direction(_ dx: CGFloat, _ dy: CGFloat) -> String {
         if abs(dx) > abs(dy) { return dx > 0 ? "right" : "left" }

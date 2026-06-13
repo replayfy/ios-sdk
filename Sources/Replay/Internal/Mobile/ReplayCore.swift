@@ -143,12 +143,10 @@ public final class ReplayCore {
                 // reports taps with the real widget label via reportInteraction
                 // (the native view-tree only ever sees the one FlutterView).
                 if config.captureTouch {
-                    self.touch.install { label, x, y, isSwipe, direction in
-                        if isSwipe {
-                            self.sendSwipe(label: label, x: x, y: y, direction: direction)
-                        } else {
-                            self.sendClick(label: label, x: x, y: y)
-                        }
+                    self.touch.install { label, x, y, kind, direction in
+                        // kind ∈ tap / swipe / long_press — routed to click /
+                        // swipe / gesture by reportInteraction.
+                        self.reportInteraction(kind: kind, label: label, x: x, y: y, direction: direction)
                     }
                 }
                 // Screen tracking → viewComponent messages. Gated at emission
