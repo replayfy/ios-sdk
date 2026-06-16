@@ -164,6 +164,12 @@ public final class ReplayBridge: NSObject {
         Replay.removePrivacyView(view)
     }
 
+    /// `[Replay addObservedInput: theTextField]`
+    @objc(addObservedInput:)
+    public static func addObservedInput(_ field: UITextField) {
+        Replay.addObservedInput(field)
+    }
+
     /// `[Replay occludeAllTextFields: YES]`
     @objc(occludeAllTextFields:)
     public static func occludeAllTextFields(_ occlude: Bool) {

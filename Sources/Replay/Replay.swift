@@ -124,6 +124,17 @@ public enum Replay {
         #endif
     }
 
+    /// Record a text input's value on the timeline. For hosts that manage
+    /// their own text widgets (React Native / Flutter), where there's no
+    /// native `UITextField` to ``addObservedInput(_:)``. Pass `masked: true`
+    /// for sensitive fields — the value is dropped (recorded as `"***"`) and
+    /// never leaves the device.
+    public static func trackInput(label: String, value: String, masked: Bool) {
+        #if canImport(UIKit)
+        ReplayCore.shared.sendInput(value: masked ? "***" : value, masked: masked, label: label)
+        #endif
+    }
+
     /// Manually end the current session and force-upload the in-memory
     /// batch. The next foregrounding triggers a fresh session.
     ///
@@ -179,6 +190,15 @@ public enum Replay {
     /// for views that were never marked.
     public static func removePrivacyView(_ view: UIView) {
         PrivacyRegistry.shared.remove(view)
+    }
+
+    /// Observe a text field so its value is recorded on the session
+    /// timeline when editing ends (not on every keystroke). Secure
+    /// fields (`isSecureTextEntry`) report a masked placeholder, never
+    /// the typed text, and the field's `placeholder` is used as the
+    /// label. Inputs are opt-in per field — never captured globally.
+    public static func addObservedInput(_ field: UITextField) {
+        ReplayCore.shared.observeInput(field)
     }
 
     /// Occlude every `UITextField` and `UITextView` in the host app

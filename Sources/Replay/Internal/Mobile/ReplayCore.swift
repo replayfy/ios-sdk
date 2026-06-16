@@ -19,6 +19,9 @@ public final class ReplayCore {
     private var collector: MobileCollector?
     private var screenshots: MobileScreenshots?
     private let touch = MobileTouchCapture()
+    // Opt-in text-input observation (Replay.addObservedInput). Retained so the
+    // observed fields' editing-end targets stay live for the engine's lifetime.
+    private let input = MobileInputCapture()
     private var perf: MobilePerfMonitor?
     // PLCrashReporter handler for signal/EXC crashes — recorded in-process and
     // recovered + emitted through the live wire on the NEXT launch. Retained so
@@ -155,6 +158,12 @@ public final class ReplayCore {
                         // swipe / gesture by reportInteraction.
                         self.reportInteraction(kind: kind, label: label, x: x, y: y, direction: direction)
                     }
+                }
+                // Text-input observation is opt-in per field (via
+                // Replay.addObservedInput); wire the sink so observed fields
+                // report their value on editing-end.
+                self.input.onInput = { [weak self] value, masked, label in
+                    self?.sendInput(value: value, masked: masked, label: label)
                 }
                 // Screen tracking → viewComponent messages. Gated at emission
                 // (not install) so setAutomaticScreenNameTagging can toggle it
@@ -294,6 +303,10 @@ public final class ReplayCore {
     }
     func sendInput(value: String, masked: Bool, label: String) {
         enqueue(MobileWire.input(value: value, masked: masked, label: label, timestamp: nowMs()))
+    }
+    /// Opt a `UITextField` into input recording (reports on editing-end).
+    func observeInput(_ field: UITextField) {
+        input.observe(field)
     }
     func sendPerformance(name: String, value: UInt64) {
         enqueue(MobileWire.performance(name: name, value: value, timestamp: nowMs()))
