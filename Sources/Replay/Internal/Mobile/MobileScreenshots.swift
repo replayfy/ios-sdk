@@ -90,7 +90,7 @@ final class MobileScreenshots {
             let rects = privacy()
             if !rects.isEmpty,
                let rendered = UIGraphicsGetImageFromCurrentImageContext()?.cgImage {
-                maskRegions(rects, from: rendered, in: ctx)
+                maskRegions(rects, from: rendered, in: ctx, scale: screenScale)
             }
 
             guard let image = UIGraphicsGetImageFromCurrentImageContext(),
@@ -116,7 +116,11 @@ final class MobileScreenshots {
     ///     than the old stripe texture on screens full of fields.
     ///   • `.pixelate` — reduce the region to coarse mosaic blocks via
     ///     `CIPixellate`. Same crop-the-clean-source path as `.blur`.
-    private func maskRegions(_ rects: [MaskRect], from rendered: CGImage, in ctx: CGContext) {
+    /// `scale` is the pixels-per-point of `rendered` relative to `ctx`'s
+    /// coordinate space: `screenScale` for the native drawHierarchy capture,
+    /// `1.0` for a Dart-supplied PNG (Flutter), where the rects already arrive
+    /// in the PNG's pixel coordinates.
+    private func maskRegions(_ rects: [MaskRect], from rendered: CGImage, in ctx: CGContext, scale: CGFloat) {
         let radius = CGFloat(PrivacyRegistry.shared.blurRadius)
         let overlayColor = UIColor(white: 0.22, alpha: 1.0)
         for item in rects {
@@ -130,22 +134,51 @@ final class MobileScreenshots {
                 ctx.restoreGState()
             case .blur, .pixelate:
                 let cropFrame = CGRect(
-                    x: frame.origin.x * screenScale,
-                    y: frame.origin.y * screenScale,
-                    width: frame.size.width * screenScale,
-                    height: frame.size.height * screenScale
+                    x: frame.origin.x * scale,
+                    y: frame.origin.y * scale,
+                    width: frame.size.width * scale,
+                    height: frame.size.height * scale
                 )
                 guard let region = rendered.cropping(to: cropFrame) else { continue }
                 let masked = item.style == .pixelate
-                    ? pixelatedRegion(region, blockSize: max(8, radius * 2))
-                    : blurredRegion(region, radius: radius)
+                    ? pixelatedRegion(region, blockSize: max(8, radius * 2), scale: scale)
+                    : blurredRegion(region, radius: radius, scale: scale)
                 guard let masked else { continue }
                 masked.draw(in: frame)
             }
         }
     }
 
-    private func blurredRegion(_ cgImage: CGImage, radius: CGFloat) -> UIImage? {
+    /// Ingest a host-captured frame (Flutter Dart-side `RepaintBoundary.toImage`):
+    /// the native PixelCopy/drawHierarchy can't read Flutter's surface, so the
+    /// Dart layer ships a PNG + occlusion rects (in PNG-pixel coords) per frame —
+    /// the rects arrive *with* the frame, so there's no poll/lag. We mask + JPEG
+    /// + enqueue on the same path as `capture()`. Used when native capture is off.
+    func submitFrame(_ png: Data, rects: [MaskRect]) {
+        autoreleasepool {
+            guard let image = UIImage(data: png) else { return }
+            let size = image.size // PNG decodes at scale 1.0 → size is in pixels
+            guard size.width > 0, size.height > 0 else { return }
+            UIGraphicsBeginImageContextWithOptions(size, false, 1.0)
+            defer { UIGraphicsEndImageContext() }
+            image.draw(in: CGRect(origin: .zero, size: size))
+            if !rects.isEmpty,
+               let ctx = UIGraphicsGetCurrentContext(),
+               let rendered = UIGraphicsGetImageFromCurrentImageContext()?.cgImage {
+                maskRegions(rects, from: rendered, in: ctx, scale: 1.0)
+            }
+            guard let out = UIGraphicsGetImageFromCurrentImageContext(),
+                  let jpeg = out.jpegData(compressionQuality: jpegQuality) else { return }
+            lock.lock()
+            pending.append((jpeg, nowMs()))
+            if pending.count > maxBuffered { pending.removeFirst(pending.count - maxBuffered) }
+            let ready = pending.count >= batchSize
+            lock.unlock()
+            if ready { flush() }
+        }
+    }
+
+    private func blurredRegion(_ cgImage: CGImage, radius: CGFloat, scale: CGFloat) -> UIImage? {
         let ciImage = CIImage(cgImage: cgImage)
         guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
         filter.setValue(ciImage, forKey: kCIInputImageKey)
@@ -154,14 +187,14 @@ final class MobileScreenshots {
               let cg = MobileScreenshots.ciContext.createCGImage(
                 output, from: ciImage.extent)
         else { return nil }
-        return UIImage(cgImage: cg, scale: screenScale, orientation: .up)
+        return UIImage(cgImage: cg, scale: scale, orientation: .up)
     }
 
     /// Coarse-mosaic a region via `CIPixellate`. `blockSize` is in source
     /// (pixel) units; clamp the output to the input extent so the filter's
     /// edge bleed doesn't shift the drawn region. Falls back to a solid box
     /// if the filter is unavailable — never leave pixels exposed.
-    private func pixelatedRegion(_ cgImage: CGImage, blockSize: CGFloat) -> UIImage? {
+    private func pixelatedRegion(_ cgImage: CGImage, blockSize: CGFloat, scale: CGFloat) -> UIImage? {
         let ciImage = CIImage(cgImage: cgImage)
         guard let filter = CIFilter(name: "CIPixellate") else {
             return solidRegion(size: ciImage.extent.size)
@@ -175,7 +208,7 @@ final class MobileScreenshots {
               let cg = MobileScreenshots.ciContext.createCGImage(
                 output, from: ciImage.extent)
         else { return solidRegion(size: ciImage.extent.size) }
-        return UIImage(cgImage: cg, scale: screenScale, orientation: .up)
+        return UIImage(cgImage: cg, scale: scale, orientation: .up)
     }
 
     private func solidRegion(size: CGSize) -> UIImage? {

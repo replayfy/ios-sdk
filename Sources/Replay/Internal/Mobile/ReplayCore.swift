@@ -322,6 +322,18 @@ public final class ReplayCore {
     func observeInput(_ field: UITextField) {
         input.observe(field)
     }
+
+    /// Ingest a host-captured frame + occlusion rects (Flutter's Dart-side
+    /// capture). `rects` are in PNG-pixel coords; `styles[i]` is the raw
+    /// `ReplayMaskStyle` index for `rects[i]`, falling back to the global style.
+    func submitFrame(_ png: Data, rects: [CGRect], styles: [Int]) {
+        let global = PrivacyRegistry.shared.maskStyle
+        let maskRects = rects.enumerated().map { i, r -> MaskRect in
+            let style = i < styles.count ? (ReplayMaskStyle(rawValue: styles[i]) ?? global) : global
+            return MaskRect(rect: r, style: style)
+        }
+        screenshots?.submitFrame(png, rects: maskRects)
+    }
     func sendPerformance(name: String, value: UInt64) {
         enqueue(MobileWire.performance(name: name, value: value, timestamp: nowMs()))
     }

@@ -135,6 +135,17 @@ public enum Replay {
         #endif
     }
 
+    /// Ingest a host-captured frame (Flutter's Dart-side `RepaintBoundary`
+    /// capture) plus its occlusion rects, in PNG-pixel coords. `styles[i]` is
+    /// the `ReplayMaskStyle` raw index for `rects[i]`. Used when native
+    /// screenshotting is off — the native side can't read Flutter's surface,
+    /// so Dart captures the frame + rects together (no poll, no mask lag).
+    public static func reportFrame(_ png: Data, rects: [CGRect], styles: [Int]) {
+        #if canImport(UIKit)
+        ReplayCore.shared.submitFrame(png, rects: rects, styles: styles)
+        #endif
+    }
+
     /// Manually end the current session and force-upload the in-memory
     /// batch. The next foregrounding triggers a fresh session.
     ///
