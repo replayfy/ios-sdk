@@ -52,6 +52,7 @@ final class MobilePerfMonitor {
     private let emit: (_ name: String, _ value: UInt64) -> Void
     private var cpuTimer: Timer?
     private var memTimer: Timer?
+    private var batteryTimer: Timer?
 
     init(emit: @escaping (_ name: String, _ value: UInt64) -> Void) { self.emit = emit }
 
@@ -65,26 +66,39 @@ final class MobilePerfMonitor {
             nc.addObserver(self, selector: #selector(self.onNotify(_:)), name: .NSProcessInfoPowerStateDidChange, object: nil)
             nc.addObserver(self, selector: #selector(self.onNotify(_:)), name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
             nc.addObserver(self, selector: #selector(self.onNotify(_:)), name: .NSBundleResourceRequestLowDiskSpace, object: nil)
-            self.sampleCPU(); self.sampleMemory()
+            self.sampleCPU(); self.sampleMemory(); self.sampleBattery()
             self.cpuTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.sampleCPU() }
             self.memTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.sampleMemory() }
+            // Battery changes slowly — a 30s poll is plenty and guarantees a
+            // drain curve even when the OS fires no level-change notification
+            // during the session (common on short sessions / real devices).
+            self.batteryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.sampleBattery() }
         }
     }
 
     func stop() {
         cpuTimer?.invalidate(); cpuTimer = nil
         memTimer?.invalidate(); memTimer = nil
+        batteryTimer?.invalidate(); batteryTimer = nil
         NotificationCenter.default.removeObserver(self)
+    }
+
+    /// Emit the current battery level + state. Skips when the level is < 0 —
+    /// the Simulator (and devices with monitoring unavailable) report -1, and
+    /// emitting a phantom 0% would read as a dead/draining battery downstream.
+    private func sampleBattery() {
+        let level = UIDevice.current.batteryLevel
+        guard level >= 0 else { return }
+        emit("batteryLevel", UInt64(level * 100))
+        emit("batteryState", UInt64(UIDevice.current.batteryState.rawValue))
     }
 
     @objc private func onNotify(_ n: Notification) {
         switch n.name {
         case ProcessInfo.thermalStateDidChangeNotification:
             emit("thermalState", UInt64(ProcessInfo.processInfo.thermalState.rawValue))
-        case UIDevice.batteryLevelDidChangeNotification:
-            emit("batteryLevel", UInt64(max(0, UIDevice.current.batteryLevel) * 100))
-        case UIDevice.batteryStateDidChangeNotification:
-            emit("batteryState", UInt64(UIDevice.current.batteryState.rawValue))
+        case UIDevice.batteryLevelDidChangeNotification, UIDevice.batteryStateDidChangeNotification:
+            sampleBattery()
         case .NSProcessInfoPowerStateDidChange:
             emit("isLowPowerModeEnabled", ProcessInfo.processInfo.isLowPowerModeEnabled ? 1 : 0)
         case UIApplication.didReceiveMemoryWarningNotification:

@@ -12,6 +12,10 @@ struct MobileStartResponse: Decodable {
     // Dashboard-controlled capture toggles (optional → default true).
     let captureConsole: Bool?
     let captureNetwork: Bool?
+    // Granular network toggles — strip headers / bodies before they leave the
+    // device when disabled. Optional → default true for older servers.
+    let captureNetworkHeaders: Bool?
+    let captureNetworkBodies: Bool?
     // false ⇒ the server's sampling gate dropped this launch; the SDK must
     // not record. Optional → default true for older servers.
     let record: Bool?

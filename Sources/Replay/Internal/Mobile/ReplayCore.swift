@@ -44,6 +44,8 @@ public final class ReplayCore {
     // Dashboard-controlled capture toggles, set from the /start response.
     private var captureConsole = true
     private var captureNetwork = true
+    private var captureNetworkHeaders = true
+    private var captureNetworkBodies = true
 
     /// Messages emitted before the async `/start` round-trip completes
     /// (the launch screen's viewComponent, or an `identify` / `track` /
@@ -109,6 +111,11 @@ public final class ReplayCore {
                 // response) overrides it when the server specifies a value.
                 self.captureConsole = resp.captureConsole ?? config.captureConsole
                 self.captureNetwork = resp.captureNetwork ?? config.captureNetwork
+                // API value wins when present; otherwise fall back to local
+                // config (so clients can remote-configure from the dashboard,
+                // but local config still applies when the server is silent).
+                self.captureNetworkHeaders = resp.captureNetworkHeaders ?? config.captureHeaders
+                self.captureNetworkBodies = resp.captureNetworkBodies ?? config.captureBodies
 
                 // Open the live-presence socket now we have a session id. Uses
                 // the distinct id known so far (identify() before /start
@@ -297,7 +304,28 @@ public final class ReplayCore {
     }
     func sendNetwork(type: String, method: String, url: String, request: String, response: String, status: UInt64, duration: UInt64) {
         guard captureNetwork else { return }
-        enqueue(MobileWire.networkCall(type: type, method: method, url: url, request: request, response: response, status: status, duration: duration, timestamp: nowMs()))
+        // Honour the workspace's granular toggles here — the single chokepoint
+        // for both native (URLSessionCapture) and RN (recordNetwork) traffic —
+        // so disabled headers/bodies never leave the device.
+        let req = filterNetSide(request)
+        let resp = filterNetSide(response)
+        enqueue(MobileWire.networkCall(type: type, method: method, url: url, request: req, response: resp, status: status, duration: duration, timestamp: nowMs()))
+    }
+
+    /// Strip `headers` and/or `body` from a `{headers, body}` JSON side per the
+    /// workspace toggles. No-op (returns the original) when both are enabled.
+    private func filterNetSide(_ json: String) -> String {
+        if captureNetworkHeaders && captureNetworkBodies { return json }
+        guard let data = json.data(using: .utf8),
+              var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return json }
+        if !captureNetworkHeaders { obj["headers"] = [String: String]() }
+        if !captureNetworkBodies { obj["body"] = NSNull() }
+        if let out = try? JSONSerialization.data(withJSONObject: obj),
+           let s = String(data: out, encoding: .utf8) {
+            return s
+        }
+        return json
     }
     func sendCrash(name: String, reason: String, stacktrace: String) {
         enqueue(MobileWire.crash(name: name, reason: reason, stacktrace: stacktrace, timestamp: nowMs()))
@@ -308,6 +336,10 @@ public final class ReplayCore {
         enqueue(MobileWire.viewComponent(screenName: screenName, viewName: viewName, visible: visible, timestamp: nowMs()))
     }
     public func sendEvent(name: String, payload: String) {
+        // RN/Flutter forward console logs as the reserved `$console` event, so
+        // honour the API's captureConsole toggle here too (sendLog already does
+        // for native logs). Custom events and `$exception` still flow.
+        if name == "$console" && !captureConsole { return }
         enqueue(MobileWire.event(name: name, payload: payload, timestamp: nowMs()))
     }
     public func setUserID(_ id: String) {
@@ -371,6 +403,13 @@ public final class ReplayCore {
         return uuid
     }
     private static func deviceModel() -> String {
+        // On the Simulator, utsname.machine is the host arch (arm64/x86_64).
+        // The real device identifier we map to a marketing name lives in this
+        // env var, so prefer it when present.
+        if let sim = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"],
+           !sim.isEmpty {
+            return sim
+        }
         var sysinfo = utsname(); uname(&sysinfo)
         let mirror = Mirror(reflecting: sysinfo.machine)
         let id = mirror.children.compactMap { ($0.value as? Int8).flatMap { $0 == 0 ? nil : String(UnicodeScalar(UInt8($0))) } }.joined()

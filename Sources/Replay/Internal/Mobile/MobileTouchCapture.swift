@@ -53,7 +53,9 @@ final class MobileTouchCapture {
                 } else {
                     kind = "tap"
                 }
-                let label = describe(touch.view)
+                // Drop taps on framework/system views (keyboard, FlutterView, …)
+                // — describe returns nil for those.
+                guard let label = describe(touch.view) else { break }
                 let x = UInt64(max(end.x, 0)), y = UInt64(max(end.y, 0))
                 handler(label, x, y, kind, direction(dx, dy))
             case .cancelled:
@@ -71,12 +73,45 @@ final class MobileTouchCapture {
         return "right"
     }
 
-    private static func describe(_ view: UIView?) -> String {
-        guard let view = view else { return "UIView" }
-        if let b = view as? UIButton { return "UIButton '\(b.currentTitle ?? "")'" }
-        if let l = view as? UILabel { return "UILabel '\(l.text ?? "")'" }
-        if let t = view as? UITextField { return "UITextField '\(t.placeholder ?? "")'" }
-        return "\(type(of: view))"
+    /// Single best label, most-specific first; returns `nil` when the only
+    /// thing left to name the view by is a framework/system class (keyboard,
+    /// cursor / input accessory, the Flutter / RN engine hosts) — those taps
+    /// are dropped, not labelled, so they don't add noise or phantom tap-rage.
+    private static func describe(_ view: UIView?) -> String? {
+        guard let view = view else { return "view" }
+        // RN maps `testID` → accessibilityIdentifier and <Text> →
+        // accessibilityLabel; the native iOS reference omits accessibility, but
+        // it's what surfaces real RN labels instead of class names. Text fields
+        // use the placeholder, never the typed value (privacy).
+        if let id = view.accessibilityIdentifier, !id.isEmpty { return id }
+        if let b = view as? UIButton,
+           let t = b.currentTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+            return String(t.prefix(50))
+        }
+        if let l = view as? UILabel,
+           let t = l.text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+            return String(t.prefix(50))
+        }
+        if let a = view.accessibilityLabel, !a.isEmpty { return String(a.prefix(50)) }
+        if let tf = view as? UITextField, let p = tf.placeholder, !p.isEmpty { return p }
+        let cls = "\(type(of: view))"
+        return isSystemClassName(cls) ? nil : cls
+    }
+
+    /// Framework/system view classes whose taps are noise rather than app
+    /// interactions: UIKit internals (`UI…` / `_UI…`, e.g. the keyboard cursor
+    /// accessory), react-native-screens (`RNS…`), React Native internals
+    /// (`RCT…`), and the Flutter engine host (`Flutter…`). Mirrors the
+    /// ingest-side denylist so signal stays consistent across SDKs.
+    private static func isSystemClassName(_ name: String) -> Bool {
+        var n = Substring(name)
+        if n.first == "_" { n = n.dropFirst() }
+        if n.hasPrefix("RNS") || n.hasPrefix("RCT") || n.hasPrefix("Flutter") { return true }
+        if n.hasPrefix("UI") {
+            let third = n.index(n.startIndex, offsetBy: 2)
+            return third < n.endIndex && n[third].isUppercase
+        }
+        return false
     }
 }
 

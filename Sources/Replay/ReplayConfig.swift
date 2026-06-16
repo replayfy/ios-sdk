@@ -44,6 +44,11 @@ public struct ReplayConfig {
     /// Include request/response headers in network capture. PII risk.
     public let captureHeaders: Bool
 
+    /// Include request/response bodies in network capture (capped at
+    /// `maxBodyBytes`). PII risk. The dashboard's `captureNetworkBodies`
+    /// overrides this when the server specifies it.
+    public let captureBodies: Bool
+
     /// Max captured body size per network event. Bodies above are
     /// truncated with a "[truncated]" marker.
     public let maxBodyBytes: Int
@@ -106,6 +111,7 @@ public struct ReplayConfig {
         captureNetwork: Bool = false,
         captureErrors: Bool = true,
         captureHeaders: Bool = false,
+        captureBodies: Bool = true,
         maxBodyBytes: Int = 4_096,
         captureSnapshotPixels: Bool = true,
         snapshotInterval: TimeInterval = 0.5,
@@ -124,6 +130,7 @@ public struct ReplayConfig {
         self.captureNetwork = captureNetwork
         self.captureErrors = captureErrors
         self.captureHeaders = captureHeaders
+        self.captureBodies = captureBodies
         self.maxBodyBytes = maxBodyBytes
         self.captureSnapshotPixels = captureSnapshotPixels
         self.snapshotInterval = snapshotInterval
