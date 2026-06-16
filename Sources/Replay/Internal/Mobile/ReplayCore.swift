@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import UIKit
+import SystemConfiguration
 
 /// Orchestrates the reference mobile recording engine: session start,
 /// screenshot capture, binary message collection, and lifecycle.
@@ -398,6 +399,7 @@ public final class ReplayCore {
             "timestamp": nowMs(),
             "deviceMemory": UInt64(ProcessInfo.processInfo.physicalMemory / 1024),
             "timezone": ReplayCore.timezone(),
+            "connectionType": ReplayCore.connectionType(),
             "width": Int(screen.width),
             "height": Int(screen.height),
         ]
@@ -432,6 +434,26 @@ public final class ReplayCore {
         let offset = TimeZone.current.secondsFromGMT()
         let sign = offset >= 0 ? "+" : "-"
         return String(format: "UTC%@%02d:%02d", sign, abs(offset) / 3600, (abs(offset) % 3600) / 60)
+    }
+
+    /// Transport the device is on at session start — "wifi" / "cellular" /
+    /// "none". Same values the reference's NWPathMonitor yields, read
+    /// synchronously (no thread-blocking wait) so it can ride the /start
+    /// payload. iOS rarely has wired ethernet, so non-cellular reachable
+    /// resolves to "wifi".
+    private static func connectionType() -> String {
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        guard let reach = withUnsafePointer(to: &addr, {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                SCNetworkReachabilityCreateWithAddress(nil, $0)
+            }
+        }) else { return "unknown" }
+        var flags = SCNetworkReachabilityFlags()
+        guard SCNetworkReachabilityGetFlags(reach, &flags) else { return "unknown" }
+        if !flags.contains(.reachable) { return "none" }
+        return flags.contains(.isWWAN) ? "cellular" : "wifi"
     }
 }
 #endif
