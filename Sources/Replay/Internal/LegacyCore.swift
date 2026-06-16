@@ -259,6 +259,10 @@ final class LegacyCore {
                 config: config,
                 onApply: { [weak self] cfg in
                     self?.applyRemoteConfig(cfg)
+                    // Route the same periodic config into the live mobile
+                    // engine so dashboard flag changes apply mid-session, not
+                    // just at /start.
+                    ReplayCore.shared.applyRemoteConfig(cfg)
                 }
             )
             self.queue.sync { self.remoteConfigFetcher = fetcher }

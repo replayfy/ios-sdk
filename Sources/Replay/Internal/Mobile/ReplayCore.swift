@@ -45,11 +45,24 @@ public final class ReplayCore {
     // presence socket so the dashboard attaches the session to the right user.
     private var distinctId: String?
 
-    // Dashboard-controlled capture toggles, set from the /start response.
+    // Dashboard-controlled capture toggles, set from the /start response and
+    // refreshed mid-session by applyRemoteConfig (see below).
     private var captureConsole = true
     private var captureNetwork = true
     private var captureNetworkHeaders = true
     private var captureNetworkBodies = true
+
+    /// Re-apply dashboard config mid-session. The periodic RemoteConfigFetcher
+    /// (owned by LegacyCore) pushes here on every refresh, so a customer
+    /// flipping a capture toggle on the dashboard takes effect on the live
+    /// mobile session without an app restart — not just at /start. Only the
+    /// toggles the mobile engine reads at capture time.
+    func applyRemoteConfig(_ cfg: RemoteConfig) {
+        captureConsole = cfg.captureConsole
+        captureNetwork = cfg.captureNetwork
+        captureNetworkHeaders = cfg.captureNetworkHeaders
+        captureNetworkBodies = cfg.captureNetworkBodies
+    }
 
     /// Messages emitted before the async `/start` round-trip completes
     /// (the launch screen's viewComponent, or an `identify` / `track` /
