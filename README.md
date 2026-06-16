@@ -106,6 +106,23 @@ ProfileScreen().replayTagScreenName("Profile")// tag the screen on first appear
 
 Secure / password fields are masked automatically.
 
+## Text input tracking
+
+Record what a user types in a field — opt in per field. It reports on
+editing-end (not per keystroke); secure fields (`isSecureTextEntry`) send
+`"***"`, never the text, and the field's placeholder is used as the label:
+
+```swift
+Replay.addObservedInput(emailField)
+Replay.addObservedInput(passwordField)   // secure → recorded as "***"
+```
+
+For a value not backed by a `UITextField`, report it explicitly:
+
+```swift
+Replay.trackInput(label: "Coupon", value: code, masked: false)
+```
+
 ## Network capture
 
 Set `captureNetwork: true`. A `URLProtocol` is auto-installed on
@@ -128,6 +145,8 @@ let session = URLSession(configuration: cfg)
 | `identify(_:properties:)` | Attach a known user (`email` / `name` / `plan` are promoted) |
 | `track(_:properties:)` | Custom timeline / funnel event |
 | `tagScreenName(_:)` | Manually set the current screen name |
+| `addObservedInput(_:)` | Record a text field's value on editing-end (secure → `"***"`) |
+| `trackInput(label:value:masked:)` | Record an input value explicitly (masked → `"***"`) |
 | `log(level:message:stack:)` | Bridge a custom logger into the console tab |
 | `addPrivacyView` / `removePrivacyView` | Per-view masking |
 | `occludeAllTextFields` / `occludeAllTextView` | Bulk input / label masking |
@@ -138,8 +157,9 @@ let session = URLSession(configuration: cfg)
 | `.replayOcclude()` / `.replayTagScreenName(_:)` | SwiftUI view modifiers |
 
 The engine additionally captures automatically: periodic screenshots,
-taps & gestures, screen navigation, performance vitals (cold start,
-frame drops, hangs, memory, thermal, battery), and crashes.
+taps & gestures, screen navigation, device info (model, RAM, OS,
+timezone, network type), performance vitals (cold start, frame drops,
+hangs, memory, thermal, battery), and crashes.
 
 ### Coming soon — currently no-ops
 
