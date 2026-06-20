@@ -417,6 +417,9 @@ public final class ReplayCore {
             "platform": "ios",
             "trackerVersion": "2.0.0",
             "revID": (info?["CFBundleVersion"] as? String) ?? "N/A",
+            // Marketing version (e.g. "1.4.2") — the human release identifier
+            // Release Intelligence prefers, over the build number in revID.
+            "appVersion": (info?["CFBundleShortVersionString"] as? String) ?? "",
             "userUUID": ReplayCore.persistentUUID(),
             "userOSVersion": UIDevice.current.systemVersion,
             "userDevice": ReplayCore.deviceModel(),
