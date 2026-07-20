@@ -424,10 +424,19 @@ public final class ReplayCore {
             "timestamp": nowMs(),
             "deviceMemory": UInt64(ProcessInfo.processInfo.physicalMemory / 1024),
             "timezone": ReplayCore.timezone(),
+            // IANA id ("Africa/Lagos") alongside the offset above — the server
+            // maps it to a country when region/locale don't resolve one.
+            "timezoneId": TimeZone.current.identifier,
+            // The device's own region + locale. The server uses these to fill
+            // the session country when IP geo can't (carrier NAT / VPN, and
+            // always in the Simulator) — far more reliable than mobile IP geo.
+            "language": Locale.current.identifier,
             "connectionType": ReplayCore.connectionType(),
             "width": Int(screen.width),
             "height": Int(screen.height),
         ]
+        let region = ReplayCore.deviceRegion()
+        if !region.isEmpty { params["regionCode"] = region }
         // If identify() ran before start, send the id so the sampling gate can
         // honour alwaysRecordIdentified.
         if let d = distinctID, !d.isEmpty { params["distinctId"] = d }
@@ -459,6 +468,14 @@ public final class ReplayCore {
         let offset = TimeZone.current.secondsFromGMT()
         let sign = offset >= 0 ? "+" : "-"
         return String(format: "UTC%@%02d:%02d", sign, abs(offset) / 3600, (abs(offset) % 3600) / 60)
+    }
+    /// The device's ISO-3166 region code ("US", "NG"). `Locale.region` on iOS 16+,
+    /// the older `regionCode` before it. Empty when the OS reports no region.
+    private static func deviceRegion() -> String {
+        if #available(iOS 16, macOS 13, tvOS 16, *) {
+            return Locale.current.region?.identifier ?? ""
+        }
+        return Locale.current.regionCode ?? ""
     }
 
     /// Transport the device is on at session start — "wifi" / "cellular" /
