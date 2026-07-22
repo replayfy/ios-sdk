@@ -28,21 +28,13 @@ public final class ReplayCore {
     // recovered + emitted through the live wire on the NEXT launch. Retained so
     // it (and the underlying reporter) isn't released.
     private var crashHandler: CrashHandler?
-    // Live-presence socket (mirrors the web SDK's presence.ts): keeps this
-    // session on the dashboard's online list for its lifetime; the backend
-    // LiveGateway flips the EndUser online on connect / offline ~10s after
-    // disconnect. Best-effort — never blocks capture.
-    private var presence: MobilePresence?
-
     private(set) var sessionID: String?
     private(set) var startedAt: UInt64 = 0
     private var active = false
-    // Project key + ingest host kept so the presence socket authenticates
-    // with the same credentials as the HTTP transport.
+    // Project key + ingest host for the HTTP transport.
     private var projectKey: String?
     private var host: String?
-    // Last identified distinct id (identify → setUserID). Passed to the
-    // presence socket so the dashboard attaches the session to the right user.
+    // Last identified distinct id (identify → setUserID), sent on the wire.
     private var distinctId: String?
 
     // Dashboard-controlled capture toggles, set from the /start response and
@@ -133,14 +125,6 @@ public final class ReplayCore {
                 // but local config still applies when the server is silent).
                 self.captureNetworkHeaders = resp.captureNetworkHeaders ?? config.captureHeaders
                 self.captureNetworkBodies = resp.captureNetworkBodies ?? config.captureBodies
-
-                // Open the live-presence socket now we have a session id. Uses
-                // the distinct id known so far (identify() before /start
-                // completed sets it); identify() afterwards calls
-                // updateDistinctId.
-                let presence = MobilePresence()
-                presence.start(host: host, projectKey: projectKey, sessionID: resp.sessionID, distinctID: self.distinctId)
-                self.presence = presence
 
                 // Wire screenshot privacy masking to the PrivacyRegistry — the
                 // same source the legacy capture path consults. Without this
@@ -258,7 +242,6 @@ public final class ReplayCore {
         starting = false
         screenshots?.stop(); screenshots = nil
         collector?.stop(); collector = nil
-        presence?.stop(); presence = nil
         touch.uninstall()
         NotificationCenter.default.removeObserver(self)
         sessionID = nil
@@ -383,7 +366,6 @@ public final class ReplayCore {
     }
     public func setUserID(_ id: String) {
         distinctId = id
-        presence?.updateDistinctID(id)
         enqueue(MobileWire.userID(id, timestamp: nowMs()))
     }
     public func sendMetadata(key: String, value: String) {

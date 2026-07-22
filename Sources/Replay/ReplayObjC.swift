@@ -53,7 +53,6 @@ public final class ReplayConfigBridge: NSObject {
     public var distinctId: String?
     public var flushInterval: TimeInterval = 5
     public var maxBufferSize: Int = 500
-    public var liveMode: Bool = true
     public var captureConsole: Bool = true
     public var captureNetwork: Bool = false
     public var captureErrors: Bool = true
@@ -85,7 +84,6 @@ public final class ReplayConfigBridge: NSObject {
             distinctId: distinctId,
             flushInterval: flushInterval,
             maxBufferSize: maxBufferSize,
-            liveMode: liveMode,
             captureConsole: captureConsole,
             captureNetwork: captureNetwork,
             captureErrors: captureErrors,
