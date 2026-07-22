@@ -66,15 +66,4 @@ Pod::Spec.new do |spec|
     swiftui.dependency "Replay/Core"
     swiftui.frameworks = ["SwiftUI"]
   end
-
-  # Opt-in live presence. MobilePresence is guarded by `#if canImport(SocketIO)`,
-  # so Core alone (no SocketIO) compiles it out and the dashboard never sees the
-  # session as "live". This subspec pulls Socket.IO-Client-Swift so canImport is
-  # true — the CocoaPods counterpart of the Package.swift SocketIO dependency
-  # (SwiftPM consumers get presence automatically; pod consumers must opt in).
-  # The Flutter plugin depends on `Replay/Presence` for exactly this reason.
-  spec.subspec "Presence" do |presence|
-    presence.dependency "Replay/Core"
-    presence.dependency "Socket.IO-Client-Swift", "~> 16.1"
-  end
 end

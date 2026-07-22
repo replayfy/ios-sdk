@@ -29,9 +29,6 @@ public struct ReplayConfig {
     /// Cap on events buffered in-memory before a flush is forced.
     public let maxBufferSize: Int
 
-    /// When false, the live-mode WebSocket (future) is skipped.
-    public let liveMode: Bool
-
     /// Capture `os_log` / `NSLog` / `print` output at runtime.
     public let captureConsole: Bool
 
@@ -106,7 +103,6 @@ public struct ReplayConfig {
         distinctId: String? = nil,
         flushInterval: TimeInterval = 5,
         maxBufferSize: Int = 500,
-        liveMode: Bool = true,
         captureConsole: Bool = true,
         captureNetwork: Bool = false,
         captureErrors: Bool = true,
@@ -125,7 +121,6 @@ public struct ReplayConfig {
         self.distinctId = distinctId
         self.flushInterval = flushInterval
         self.maxBufferSize = maxBufferSize
-        self.liveMode = liveMode
         self.captureConsole = captureConsole
         self.captureNetwork = captureNetwork
         self.captureErrors = captureErrors

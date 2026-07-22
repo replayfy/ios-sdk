@@ -46,20 +46,12 @@ let package = Package(
             url: "https://github.com/microsoft/plcrashreporter.git",
             from: "1.12.0"
         ),
-        // socket.io-client-swift — backs the live-presence channel
-        // (MobilePresence), the iOS counterpart of the web SDK's
-        // presence socket. Pure Swift, supports iOS 15+.
-        .package(
-            url: "https://github.com/socketio/socket.io-client-swift.git",
-            from: "16.1.0"
-        ),
     ],
     targets: [
         .target(
             name: "Replay",
             dependencies: [
                 .product(name: "CrashReporter", package: "plcrashreporter"),
-                .product(name: "SocketIO", package: "socket.io-client-swift"),
             ],
             path: "Sources/Replay"
         ),
