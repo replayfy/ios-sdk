@@ -1,0 +1,47 @@
+name: CI
+
+# iOS has NO "deploy" step: Swift Package Manager resolves the package directly
+# from a git tag, so releasing = pushing a tag (no registry upload). This
+# workflow is the build GATE that protects that tag.
+#
+# IMPORTANT: this SDK is iOS-only (UIKit-based recording), so it MUST be built
+# for an iOS destination. Do NOT use `swift build` — that targets the macOS host,
+# where UIKit (and therefore the recording engine) is compiled out, producing a
+# misleading "cannot find ... in scope" error. xcodebuild -destination iOS is the
+# correct test.
+# (CocoaPods, if you enable it, is the only path that needs a real publish step —
+#  `pod trunk push Replayfy.podspec` with a COCOAPODS_TRUNK_TOKEN secret.)
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  build:
+    # macos-15 ships newer Xcodes. The source uses Swift 6.1+ syntax (e.g.
+    # trailing commas in function calls / parameter lists), which needs
+    # Xcode 16.3+ — the older default on macos-14 (Xcode 15.4 / Swift 5.10)
+    # rejects it as "unexpected ',' separator".
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the latest installed Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: Build core (iOS)
+        run: |
+          xcodebuild build \
+            -scheme Replayfy \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build SwiftUI integration (iOS)
+        run: |
+          xcodebuild build \
+            -scheme ReplaySwiftUI \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO

@@ -103,6 +103,45 @@ public enum Replay {
         #endif
     }
 
+    /// Report a developer-CAUGHT exception onto the session timeline. Emits the
+    /// same reserved event the automatic crash handling produces, so a handled
+    /// error is first-class in the dashboard's issues without crashing the app.
+    ///
+    /// - Parameters:
+    ///   - error: The caught error.
+    ///   - handled: True (default) for a caught/recovered error; false to mark it
+    ///              fatal. Maps to the wire's `fatal` discriminator
+    ///              (`fatal = !handled`) — handled classifies as an "exception",
+    ///              unhandled as a "crash".
+    ///   - properties: Optional extra metadata, merged into the payload.
+    public static func captureException(
+        _ error: Error,
+        handled: Bool = true,
+        properties: [String: Any]? = nil
+    ) {
+        #if canImport(UIKit)
+        // Swift errors carry no stack, so capture the call site's stack — the
+        // best available context for a caught error.
+        var dict: [String: Any] = [
+            "message": String(describing: error),
+            "stack": Thread.callStackSymbols.joined(separator: "\n"),
+            "fatal": !handled,
+        ]
+        if let properties = properties,
+           JSONSerialization.isValidJSONObject(properties) {
+            for (key, value) in properties { dict[key] = value }
+        }
+        var payload = ""
+        if let data = try? JSONSerialization.data(withJSONObject: dict),
+           let str = String(data: data, encoding: .utf8) {
+            payload = str
+        }
+        // Reserved event name — same channel as track; the backend decodes
+        // `$exception` payloads into an issue row (crash vs exception by `fatal`).
+        ReplayCore.shared.sendEvent(name: "$exception", payload: payload)
+        #endif
+    }
+
     /// Report a host-captured interaction (used by the Flutter plugin's
     /// Dart-side gesture capture, which knows the real widget label that the
     /// native FlutterView hit-test cannot). `kind` ∈ "tap"/"long_press"/"swipe".
@@ -368,16 +407,21 @@ public enum Replay {
     /// Mirrors the reference mobile SDK's `optOutOfSchematicRecordings()` /
     /// `optIntoSchematicRecordings()`.
     public static func optOutOfSchematicRecordings(_ optOut: Bool) {
-        // ⚠️ STUB — sets a flag on the un-booted LegacyCore that the live
-        // engine never reads; pixel capture is unaffected. See
-        // docs/sdk-facade-status.md.
+        // Persist the intent (read back by isOptedOutOfSchematicRecordings).
         LegacyCore.shared.setSchematicOptOut(optOut)
+        #if canImport(UIKit)
+        // Apply to the LIVE engine: schematic capture IS the screenshot stream,
+        // so opting out pauses it while every other event type keeps flowing.
+        if optOut {
+            ReplayCore.shared.pauseCapture()
+        } else {
+            ReplayCore.shared.resumeCapture()
+        }
+        #endif
     }
 
     /// Whether schematic (snapshot) recording is currently opted out.
     public static var isOptedOutOfSchematicRecordings: Bool {
-        // ⚠️ STUB — reads the inert LegacyCore flag (see
-        // optOutOfSchematicRecordings). docs/sdk-facade-status.md.
         LegacyCore.shared.isSchematicOptedOut
     }
 
@@ -392,10 +436,13 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `urlForCurrentSession()`.
     public static func urlForCurrentSession() -> String? {
-        // ⚠️ STUB — derived from the un-booted LegacyCore's (nonexistent)
-        // session, so returns nil for live sessions. Re-home onto
-        // ReplayCore.sessionID + apiHost. See docs/sdk-facade-status.md.
-        LegacyCore.shared.urlForCurrentSession
+        #if canImport(UIKit)
+        guard let sid = ReplayCore.shared.sessionID,
+              let host = ReplayCore.shared.host else { return nil }
+        return "\(dashboardHost(host))/sessions/\(sid)"
+        #else
+        return nil
+        #endif
     }
 
     /// Dashboard URL for the currently-identified user (all
@@ -404,9 +451,23 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `urlForCurrentUser()`.
     public static func urlForCurrentUser() -> String? {
-        // ⚠️ STUB — see urlForCurrentSession; nil for live sessions.
-        // docs/sdk-facade-status.md.
-        LegacyCore.shared.urlForCurrentUser
+        #if canImport(UIKit)
+        guard let distinctId = ReplayCore.shared.distinctId,
+              let host = ReplayCore.shared.host else { return nil }
+        return "\(dashboardHost(host))/users/\(distinctId)"
+        #else
+        return nil
+        #endif
+    }
+
+    /// Turn the ingest host into its dashboard origin by swapping `://api.`
+    /// for `://app.` (self-hosted hosts without that prefix pass through).
+    private static func dashboardHost(_ apiHost: String) -> String {
+        let trimmed = apiHost.hasSuffix("/") ? String(apiHost.dropLast()) : apiHost
+        if let range = trimmed.range(of: "://api.") {
+            return trimmed.replacingCharacters(in: range, with: "://app.")
+        }
+        return trimmed
     }
 
     /// Attach a sticky property to the END USER (persists across
