@@ -15,8 +15,10 @@ let package = Package(
         .macOS(.v12),
     ],
     products: [
+        // Distributable product is "Replayfy"; the module customers
+        // import is the target name, "Replay" (`import Replay`).
         .library(
-            name: "Replay",
+            name: "Replayfy",
             targets: ["Replay"]
         ),
         // Optional SwiftUI integration — gives customers

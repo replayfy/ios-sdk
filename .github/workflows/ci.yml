@@ -1,0 +1,38 @@
+name: CI
+
+# iOS has NO "deploy" step: Swift Package Manager resolves the package directly
+# from a git tag, so releasing = pushing a tag (no registry upload). This
+# workflow is the build GATE that protects that tag.
+#
+# IMPORTANT: this SDK is iOS-only (UIKit-based recording), so it MUST be built
+# for an iOS destination. Do NOT use `swift build` — that targets the macOS host,
+# where UIKit (and therefore the recording engine) is compiled out, producing a
+# misleading "cannot find ... in scope" error. xcodebuild -destination iOS is the
+# correct test.
+# (CocoaPods, if you enable it, is the only path that needs a real publish step —
+#  `pod trunk push Replayfy.podspec` with a COCOAPODS_TRUNK_TOKEN secret.)
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build core (iOS)
+        run: |
+          xcodebuild build \
+            -scheme Replayfy \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build SwiftUI integration (iOS)
+        run: |
+          xcodebuild build \
+            -scheme ReplaySwiftUI \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO
