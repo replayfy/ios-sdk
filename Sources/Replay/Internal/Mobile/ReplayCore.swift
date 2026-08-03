@@ -33,9 +33,11 @@ public final class ReplayCore {
     private var active = false
     // Project key + ingest host for the HTTP transport.
     private var projectKey: String?
-    private var host: String?
+    // Readable by the facade (Replay.swift) to build dashboard deep-links.
+    private(set) var host: String?
     // Last identified distinct id (identify → setUserID), sent on the wire.
-    private var distinctId: String?
+    // Readable by the facade for urlForCurrentUser().
+    private(set) var distinctId: String?
 
     // Dashboard-controlled capture toggles, set from the /start response and
     // refreshed mid-session by applyRemoteConfig (see below).

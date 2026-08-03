@@ -407,16 +407,21 @@ public enum Replay {
     /// Mirrors the reference mobile SDK's `optOutOfSchematicRecordings()` /
     /// `optIntoSchematicRecordings()`.
     public static func optOutOfSchematicRecordings(_ optOut: Bool) {
-        // ⚠️ STUB — sets a flag on the un-booted LegacyCore that the live
-        // engine never reads; pixel capture is unaffected. See
-        // docs/sdk-facade-status.md.
+        // Persist the intent (read back by isOptedOutOfSchematicRecordings).
         LegacyCore.shared.setSchematicOptOut(optOut)
+        #if canImport(UIKit)
+        // Apply to the LIVE engine: schematic capture IS the screenshot stream,
+        // so opting out pauses it while every other event type keeps flowing.
+        if optOut {
+            ReplayCore.shared.pauseCapture()
+        } else {
+            ReplayCore.shared.resumeCapture()
+        }
+        #endif
     }
 
     /// Whether schematic (snapshot) recording is currently opted out.
     public static var isOptedOutOfSchematicRecordings: Bool {
-        // ⚠️ STUB — reads the inert LegacyCore flag (see
-        // optOutOfSchematicRecordings). docs/sdk-facade-status.md.
         LegacyCore.shared.isSchematicOptedOut
     }
 
@@ -431,10 +436,13 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `urlForCurrentSession()`.
     public static func urlForCurrentSession() -> String? {
-        // ⚠️ STUB — derived from the un-booted LegacyCore's (nonexistent)
-        // session, so returns nil for live sessions. Re-home onto
-        // ReplayCore.sessionID + apiHost. See docs/sdk-facade-status.md.
-        LegacyCore.shared.urlForCurrentSession
+        #if canImport(UIKit)
+        guard let sid = ReplayCore.shared.sessionID,
+              let host = ReplayCore.shared.host else { return nil }
+        return "\(dashboardHost(host))/sessions/\(sid)"
+        #else
+        return nil
+        #endif
     }
 
     /// Dashboard URL for the currently-identified user (all
@@ -443,9 +451,23 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `urlForCurrentUser()`.
     public static func urlForCurrentUser() -> String? {
-        // ⚠️ STUB — see urlForCurrentSession; nil for live sessions.
-        // docs/sdk-facade-status.md.
-        LegacyCore.shared.urlForCurrentUser
+        #if canImport(UIKit)
+        guard let distinctId = ReplayCore.shared.distinctId,
+              let host = ReplayCore.shared.host else { return nil }
+        return "\(dashboardHost(host))/users/\(distinctId)"
+        #else
+        return nil
+        #endif
+    }
+
+    /// Turn the ingest host into its dashboard origin by swapping `://api.`
+    /// for `://app.` (self-hosted hosts without that prefix pass through).
+    private static func dashboardHost(_ apiHost: String) -> String {
+        let trimmed = apiHost.hasSuffix("/") ? String(apiHost.dropLast()) : apiHost
+        if let range = trimmed.range(of: "://api.") {
+            return trimmed.replacingCharacters(in: range, with: "://app.")
+        }
+        return trimmed
     }
 
     /// Attach a sticky property to the END USER (persists across
