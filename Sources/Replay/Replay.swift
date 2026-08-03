@@ -103,6 +103,45 @@ public enum Replay {
         #endif
     }
 
+    /// Report a developer-CAUGHT exception onto the session timeline. Emits the
+    /// same reserved event the automatic crash handling produces, so a handled
+    /// error is first-class in the dashboard's issues without crashing the app.
+    ///
+    /// - Parameters:
+    ///   - error: The caught error.
+    ///   - handled: True (default) for a caught/recovered error; false to mark it
+    ///              fatal. Maps to the wire's `fatal` discriminator
+    ///              (`fatal = !handled`) — handled classifies as an "exception",
+    ///              unhandled as a "crash".
+    ///   - properties: Optional extra metadata, merged into the payload.
+    public static func captureException(
+        _ error: Error,
+        handled: Bool = true,
+        properties: [String: Any]? = nil
+    ) {
+        #if canImport(UIKit)
+        // Swift errors carry no stack, so capture the call site's stack — the
+        // best available context for a caught error.
+        var dict: [String: Any] = [
+            "message": String(describing: error),
+            "stack": Thread.callStackSymbols.joined(separator: "\n"),
+            "fatal": !handled,
+        ]
+        if let properties = properties,
+           JSONSerialization.isValidJSONObject(properties) {
+            for (key, value) in properties { dict[key] = value }
+        }
+        var payload = ""
+        if let data = try? JSONSerialization.data(withJSONObject: dict),
+           let str = String(data: data, encoding: .utf8) {
+            payload = str
+        }
+        // Reserved event name — same channel as track; the backend decodes
+        // `$exception` payloads into an issue row (crash vs exception by `fatal`).
+        ReplayCore.shared.sendEvent(name: "$exception", payload: payload)
+        #endif
+    }
+
     /// Report a host-captured interaction (used by the Flutter plugin's
     /// Dart-side gesture capture, which knows the real widget label that the
     /// native FlutterView hit-test cannot). `kind` ∈ "tap"/"long_press"/"swipe".
