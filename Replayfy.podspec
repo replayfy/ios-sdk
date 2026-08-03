@@ -49,6 +49,13 @@ Pod::Spec.new do |spec|
   spec.ios.deployment_target = "15.0"
   spec.swift_versions = ["5.9"]
 
+  # The crash-capture dependency (PLCrashReporter, below) ships a static
+  # .xcframework. A pod that transitively links a static binary must itself be
+  # built as a static framework — otherwise `pod lib lint` / `pod trunk push`
+  # fails with "transitive dependencies that include statically linked
+  # binaries". This is the standard requirement for PLCrashReporter-based pods.
+  spec.static_framework = true
+
   spec.default_subspec = "Core"
 
   spec.subspec "Core" do |core|
