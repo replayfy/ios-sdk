@@ -19,9 +19,18 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macos-15 ships newer Xcodes. The source uses Swift 6.1+ syntax (e.g.
+    # trailing commas in function calls / parameter lists), which needs
+    # Xcode 16.3+ — the older default on macos-14 (Xcode 15.4 / Swift 5.10)
+    # rejects it as "unexpected ',' separator".
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select the latest installed Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
 
       - name: Build core (iOS)
         run: |
