@@ -357,4 +357,4 @@ when `blockGestures` is `true` (the default).
 ## Links
 
 - Docs: https://docs.replayfy.app/platforms/ios
-- Dashboard: https://replayfy.app
+- Dashboard: https://app.replayfy.app
