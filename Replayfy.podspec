@@ -21,7 +21,7 @@
 Pod::Spec.new do |spec|
   spec.name         = "Replayfy"
   spec.module_name  = "Replay"
-  spec.version      = "0.0.2"
+  spec.version      = "0.0.3"
   spec.summary      = "Session replay, product analytics & error monitoring for iOS."
   spec.description  = <<-DESC
     Replayfy is the iOS SDK for session replay, product analytics, and
