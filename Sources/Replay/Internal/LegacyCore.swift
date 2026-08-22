@@ -872,7 +872,7 @@ final class LegacyCore {
     var urlForCurrentSession: String? {
         let sessionId: String? = queue.sync { runtime?.sessionId }
         guard let sid = sessionId, let host = dashboardHost else { return nil }
-        return "\(host)/sessions/\(sid)"
+        return "\(host)/recordings/\(sid)"
     }
 
     /// Dashboard URL for the currently-identified user, or nil

@@ -1,0 +1,35 @@
+name: Release xcframework
+
+# Build Replay.xcframework on a tag and attach the zip + its checksum to the
+# GitHub Release, so SPM/CocoaPods can consume a BINARY (no git tag-listing —
+# the failure mode customers hit). Requires the build script to be validated on
+# a Mac first (see DISTRIBUTION.md); until then this is scaffolding.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create/attach release assets
+
+jobs:
+  release:
+    runs-on: macos-15 # newer Xcode; matches CI
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build Replay.xcframework
+        run: bash scripts/build-xcframework.sh Replay
+
+      - name: Checksum
+        id: sum
+        run: echo "checksum=$(swift package compute-checksum build/Replay.xcframework.zip)" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2
+        with:
+          files: build/Replay.xcframework.zip
+          body: |
+            Binary `Replay.xcframework` for SwiftPM `.binaryTarget` / CocoaPods `vendored_frameworks`.
+            checksum: `${{ steps.sum.outputs.checksum }}`

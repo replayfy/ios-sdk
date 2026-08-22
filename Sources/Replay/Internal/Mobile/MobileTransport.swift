@@ -85,6 +85,25 @@ final class MobileTransport {
         post(path: "/v1/mobile/images", body: gzippedArchive, completion: completion)
     }
 
+    /// Best-effort "drop this session" signal — POST /v1/mobile/cancel with the
+    /// session bearer token and a JSON `{ sessionId }`. Fire-and-forget:
+    /// cancelSession tears down locally regardless of the outcome.
+    func cancel(sessionID: String, completion: ((Bool) -> Void)? = nil) {
+        guard let token = token, let url = URL(string: baseURL + "/v1/mobile/cancel"),
+              let body = try? JSONSerialization.data(withJSONObject: ["sessionId": sessionID]) else {
+            completion?(false); return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = body
+        session.dataTask(with: req) { _, resp, _ in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            completion?((200...299).contains(code))
+        }.resume()
+    }
+
     private func post(path: String, body: Data, completion: @escaping (Bool) -> Void) {
         guard let token = token, let url = URL(string: baseURL + path) else {
             completion(false); return

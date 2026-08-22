@@ -52,6 +52,17 @@ final class MobileScreenshots {
         flush()
     }
 
+    /// Drop pending frames WITHOUT uploading — the cancelSession counterpart to
+    /// stop() (which flushes). Invalidate synchronously when already on main so
+    /// no capture fires between here and teardown.
+    func discard() {
+        let clear = {
+            self.timer?.invalidate(); self.timer = nil
+            self.lock.lock(); self.pending.removeAll(); self.lock.unlock()
+        }
+        if Thread.isMainThread { clear() } else { DispatchQueue.main.async(execute: clear) }
+    }
+
     /// Suspend capture while backgrounded — shooting an invisible window
     /// just inflates the archive. Flushes what's pending.
     func pause() {

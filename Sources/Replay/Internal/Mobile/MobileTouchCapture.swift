@@ -7,11 +7,17 @@ import ObjectiveC
 /// (held ≥ 0.5 s with little movement), else tap — derives a label from the
 /// hit view, and forwards to the engine.
 final class MobileTouchCapture {
-    /// `kind` is "tap" / "long_press" / "swipe".
+    /// `kind` is "tap" / "long_press" / "swipe" / "pinch" / "rotate".
     typealias Handler = (_ label: String, _ x: UInt64, _ y: UInt64, _ kind: String, _ direction: String) -> Void
 
     /// Press held at least this long (with little movement) → long_press.
     private static let longPressThreshold: CFTimeInterval = 0.5
+
+    /// Advanced gestures (pinch / rotate). Off by default — correlating the two
+    /// touches every event costs nothing until a host opts in via
+    /// `Replay.enableAdvancedGestureRecognizer(true)`. tap/swipe/long_press are
+    /// always on regardless of this flag.
+    static var advancedGesturesEnabled = false
 
     private static var handler: Handler?
     private static var swizzled = false
@@ -35,8 +41,21 @@ final class MobileTouchCapture {
     static func capture(event: UIEvent, in window: UIWindow) {
         guard let handler = handler, event.type == .touches,
               let touches = event.allTouches else { return }
+        // Advanced multi-touch (pinch / rotate) is correlated separately and
+        // marks its two touches "consumed" so the single-touch classifier below
+        // doesn't ALSO emit a pair of swipes for the same gesture.
+        if advancedGesturesEnabled { handleMultiTouch(touches, in: window) }
         for touch in touches {
             let id = ObjectIdentifier(touch)
+            // Skip touches already accounted for by a two-finger gesture; clear
+            // them from the consumed set as they lift.
+            if consumedByGesture.contains(id) {
+                if touch.phase == .ended || touch.phase == .cancelled {
+                    starts[id] = nil
+                    consumedByGesture.remove(id)
+                }
+                continue
+            }
             switch touch.phase {
             case .began:
                 starts[id] = (touch.location(in: window), CACurrentMediaTime())
@@ -66,6 +85,67 @@ final class MobileTouchCapture {
     }
 
     private static var starts: [ObjectIdentifier: (CGPoint, CFTimeInterval)] = [:]
+
+    // ── Advanced multi-touch (pinch / rotate) ────────────────────────
+    // Correlate exactly two simultaneous touches: capture their initial
+    // separation + angle when the second finger lands, track the latest as they
+    // move, and emit ONCE when a finger lifts. Two-finger scrolls / accidental
+    // double-touches stay below threshold and are dropped.
+    private static var pinchTracking = false
+    private static var pinchEmitted = false
+    private static var pinchInitialDistance: CGFloat = 0
+    private static var pinchInitialAngle: CGFloat = 0
+    private static var pinchLastDistance: CGFloat = 0
+    private static var pinchLastAngle: CGFloat = 0
+    private static var pinchCenter: CGPoint = .zero
+    /// Touch ids owned by the active two-finger gesture — the single-touch
+    /// classifier ignores these so a pinch isn't double-counted as two swipes.
+    private static var consumedByGesture: Set<ObjectIdentifier> = []
+
+    private static func handleMultiTouch(_ touches: Set<UITouch>, in window: UIWindow) {
+        let down = touches.filter { $0.phase == .began || $0.phase == .moved || $0.phase == .stationary }
+        if down.count == 2 {
+            let a = down.first!.location(in: window)
+            let b = down.dropFirst().first!.location(in: window)
+            let dist = hypot(a.x - b.x, a.y - b.y)
+            let ang = atan2(b.y - a.y, b.x - a.x)
+            if !pinchTracking {
+                pinchTracking = true
+                pinchEmitted = false
+                pinchInitialDistance = dist
+                pinchInitialAngle = ang
+            }
+            consumedByGesture.formUnion(down.map { ObjectIdentifier($0) })
+            pinchLastDistance = dist
+            pinchLastAngle = ang
+            pinchCenter = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+        } else if pinchTracking && down.count < 2 {
+            emitPinchRotate(in: window)
+            pinchTracking = false
+        }
+    }
+
+    private static func emitPinchRotate(in window: UIWindow) {
+        guard let handler = handler, !pinchEmitted, pinchInitialDistance > 1 else { return }
+        pinchEmitted = true
+        let scale = pinchLastDistance / pinchInitialDistance
+        var angleDelta = pinchLastAngle - pinchInitialAngle
+        while angleDelta > .pi { angleDelta -= 2 * .pi }   // normalize to [-π, π]
+        while angleDelta < -.pi { angleDelta += 2 * .pi }
+
+        let label = describe(window.hitTest(pinchCenter, with: nil)) ?? "view"
+        let x = UInt64(max(pinchCenter.x, 0)), y = UInt64(max(pinchCenter.y, 0))
+        // Pinch when separation changed ≥15%; rotate when the line between the
+        // fingers turned ≥15°. Emit whichever crossed its threshold (both if the
+        // user did both). `direction` carries the sense: pinch out/in (spread /
+        // close), rotate cw/ccw.
+        if abs(scale - 1) >= 0.15 {
+            handler(label, x, y, "pinch", scale >= 1 ? "out" : "in")
+        }
+        if abs(angleDelta) >= (.pi / 12) {
+            handler(label, x, y, "rotate", angleDelta >= 0 ? "cw" : "ccw")
+        }
+    }
 
     private static func direction(_ dx: CGFloat, _ dy: CGFloat) -> String {
         if abs(dx) > abs(dy) { return dx > 0 ? "right" : "left" }
