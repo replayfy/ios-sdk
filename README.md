@@ -49,7 +49,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/replayfy/ios-sdk.git", from: "0.0.1")
+    .package(url: "https://github.com/replayfy/ios-sdk.git", from: "0.0.4")
 ],
 targets: [
     .target(
@@ -66,7 +66,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'Replayfy', '~> 0.0.1'
+pod 'Replayfy', '~> 0.0.4'
 ```
 
 ## Quick start
@@ -133,6 +133,7 @@ default. Pass any subset to `ReplayConfig(...)`.
 | `autoScreenName` | `Bool` | `true` | Auto-detect the current screen from the foreground view controller. |
 | `useRemoteConfig` | `Bool` | `true` | Let dashboard settings override these values at runtime. |
 | `captureTouch` | `Bool` | `true` | Capture taps natively (disable only for host-driven capture such as Flutter). |
+| `excludedScreens` | `[String]` | `[]` | Screen names whose frame capture pauses while they're foreground (case-insensitive); mutable at runtime via `Replay.excludeScreen`. |
 
 ## API
 
@@ -149,6 +150,11 @@ Replay.start(with: ReplayConfig(apiKey: "YOUR_API_KEY",
 // on the next foreground.
 Replay.stop()
 
+// Discard the current session WITHOUT uploading — the buffered events
+// are dropped and the server drops whatever already streamed. A fresh
+// session can start afterward. Unlike stop() (graceful end + upload).
+Replay.cancelSession()
+
 // Whether a session is currently recording.
 if Replay.isRecording { /* … */ }
 
@@ -158,6 +164,15 @@ Replay.resumeRecording()
 
 // Force a new logical session (e.g. after logout → login).
 Replay.startNewSession()
+
+// Keep the SAME session across a brief switch to another app (a gap up
+// to windowSeconds); a longer gap starts a fresh session on return.
+Replay.allowShortBreakForAnotherApp(true, windowSeconds: 30)
+
+// Record only one session per app launch instead of the default many.
+// The current/next session records, then no further sessions open in
+// this process.
+Replay.setMultiSessionRecord(false)
 
 // Stop recording and block up to `timeoutSeconds` until the buffer is
 // flushed — use from applicationWillTerminate or a sign-out flow.
@@ -214,6 +229,39 @@ Replay.tagScreenName("Checkout")
 
 // Toggle the automatic screen-name tagger at runtime.
 Replay.setAutomaticScreenNameTagging(false)
+
+// Exclude a screen from replay by name (case-insensitive; matched
+// against the auto-tagged / tagScreenName name). While it's foreground
+// the frame capture pauses — taps, network, console, and performance
+// events keep flowing — and resumes on the next non-excluded screen.
+Replay.excludeScreen("PinPad")
+
+// Stop excluding a screen — frame capture resumes next time it's shown.
+Replay.unexcludeScreen("PinPad")
+
+// Replace the entire excluded-screens list in one call.
+Replay.setExcludedScreens(["PinPad", "AccountRecovery"])
+```
+
+Screen exclusion is distinct from `occludeSensitiveScreen(_:)`: occlusion
+keeps recording but blanks the frame, whereas an excluded screen captures
+no frames at all. Seed the initial list at start via
+`ReplayConfig(excludedScreens:)`:
+
+```swift
+Replay.start(with: ReplayConfig(
+    apiKey: "YOUR_API_KEY",
+    apiHost: "https://us.replayfy.app",
+    excludedScreens: ["PinPad", "AccountRecovery"]
+))
+```
+
+### Gestures
+
+```swift
+// Additionally capture pinch and rotate gestures, on top of the
+// always-on tap / swipe / long-press. Default off.
+Replay.enableAdvancedGestureRecognizer(true)
 ```
 
 ### Logging
@@ -290,11 +338,9 @@ Replay.reportFrame(pngData, rects: rects, styles: styles)
 
 > **Not yet active.** A few methods are on the public surface but are
 > no-ops in this release, pending an engine follow-up:
-> `cancelSession()`, `optOutOfSchematicRecordings(_:)` /
-> `isOptedOutOfSchematicRecordings`, `urlForCurrentSession()` /
-> `urlForCurrentUser()`, `enableAdvancedGestureRecognizer(_:)`,
-> `allowShortBreakForAnotherApp(_:windowSeconds:)`, and
-> `setMultiSessionRecord(_:)`. Calling them is safe but has no effect.
+> `optOutOfSchematicRecordings(_:)` / `isOptedOutOfSchematicRecordings`
+> and `urlForCurrentSession()` / `urlForCurrentUser()`. Calling them is
+> safe but has no effect.
 
 ## Privacy & masking
 
