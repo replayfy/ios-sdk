@@ -222,6 +222,23 @@ public enum Replay {
         #endif
     }
 
+    /// "Don't record this screen" — exclude a screen from replay by name (the same
+    /// name the auto-tagger / ``tagScreenName(_:)`` uses; case-insensitive). While
+    /// an excluded screen is foreground the frame loop pauses; taps, network and
+    /// console keep flowing. Also seedable at boot via
+    /// ``ReplayConfig/excludedScreens``.
+    public static func excludeScreen(_ name: String) {
+        ReplayCore.shared.excludeScreen(name)
+    }
+    /// Stop excluding a screen — recording resumes next time it's shown.
+    public static func unexcludeScreen(_ name: String) {
+        ReplayCore.shared.unexcludeScreen(name)
+    }
+    /// Replace the whole excluded-screens denylist.
+    public static func setExcludedScreens(_ names: [String]) {
+        ReplayCore.shared.setExcludedScreens(names)
+    }
+
     #if canImport(UIKit)
     /// Mark a view as privacy-sensitive — its contents won't appear
     /// in playback, taps on it are blanked, and the view tree
@@ -369,9 +386,9 @@ public enum Replay {
     ///
     /// Mirrors the reference mobile SDK's `cancelCurrentSession()`.
     public static func cancelSession() {
-        // ⚠️ STUB — LegacyCore isn't booted by start(); this does NOT cancel
-        // the live ReplayCore session. See docs/sdk-facade-status.md.
-        LegacyCore.shared.cancelCurrentSession()
+        #if canImport(UIKit)
+        ReplayCore.shared.cancelSession()
+        #endif
     }
 
     // -----------------------------------------------------------------
@@ -439,7 +456,7 @@ public enum Replay {
         #if canImport(UIKit)
         guard let sid = ReplayCore.shared.sessionID,
               let host = ReplayCore.shared.host else { return nil }
-        return "\(dashboardHost(host))/sessions/\(sid)"
+        return "\(dashboardHost(host))/recordings/\(sid)"
         #else
         return nil
         #endif
@@ -623,47 +640,49 @@ public enum Replay {
         URLSessionCapture.captureCustomConfiguration(configuration)
     }
 
-    /// Toggle capture of advanced gestures — long-press, four-
-    /// direction swipe, pinch — in addition to the always-on tap.
-    /// When enabled, each gesture emits a TapEventData with
-    /// `gesture` set to "long_press" / "swipe_left" / "swipe_right" /
-    /// "swipe_up" / "swipe_down" / "pinch". Pinch events also
-    /// carry a `pinchScale` (final ratio).
+    /// Toggle capture of advanced gestures — pinch + rotate — in
+    /// addition to the always-on tap / swipe / long-press. When
+    /// enabled, a two-finger gesture emits a `gesture` message with
+    /// `kind` "pinch" (direction "out"/"in" for spread/close) or
+    /// "rotate" (direction "cw"/"ccw"). Sub-threshold two-finger
+    /// motion (scrolls, accidental touches) is dropped.
     ///
-    /// Default off. The extra recognizers attach lazily to newly-
-    /// added windows AFTER the flag flips, so non-users pay zero
-    /// overhead.
+    /// Default off — when off the touch engine skips two-finger
+    /// correlation entirely, so non-users pay zero overhead.
     ///
     /// Mirrors the reference mobile SDK's `enableAdvancedGestureRecognizer(_:)`.
     public static func enableAdvancedGestureRecognizer(_ enabled: Bool) {
-        // ⚠️ STUB — needs an advanced-gesture recognizer in the live engine;
-        // the LegacyCore flag is inert. See docs/sdk-facade-status.md.
-        LegacyCore.shared.setAdvancedGesturesEnabled(enabled)
+        #if canImport(UIKit)
+        ReplayCore.shared.setAdvancedGestures(enabled)
+        #endif
     }
 
-    /// Allow brief backgrounding (≤ `windowSeconds`, default 30 s)
-    /// WITHOUT ending the session. The same session resumes when
-    /// the user returns. Default off.
+    /// Allow brief backgrounding (≤ `windowSeconds`) WITHOUT ending
+    /// the session — the same session resumes when the user returns.
+    /// A longer break (or `allow=false`) rotates to a fresh session on
+    /// return, so a long absence can't inflate one multi-hour session.
+    /// Default: brief/medium breaks are tolerated (up to the SDK's
+    /// 30-min window) until a host narrows it here.
     ///
     /// Mirrors the reference mobile SDK's `allowShortBreakForAnotherApp(_:)`.
     public static func allowShortBreakForAnotherApp(
         _ allow: Bool,
         windowSeconds: TimeInterval = 30
     ) {
-        // ⚠️ STUB — needs session-resume-window logic in the live engine; the
-        // LegacyCore flag is inert. See docs/sdk-facade-status.md.
-        LegacyCore.shared.setAllowShortBreak(allow, windowSeconds: windowSeconds)
+        #if canImport(UIKit)
+        ReplayCore.shared.setAllowShortBreak(allow, windowSeconds: windowSeconds)
+        #endif
     }
 
-    /// Toggle multi-session recording per app launch. When false,
-    /// only ONE session fires per process — subsequent
-    /// foregroundings after a session_end are no-ops. Default true.
+    /// Toggle multi-session recording per app launch. When false, the
+    /// current/next session still records, then no further sessions
+    /// open this process (later rotations become no-ops). Default true.
     ///
     /// Mirrors the reference mobile SDK's `setMultiSessionRecord(_:)`.
     public static func setMultiSessionRecord(_ enabled: Bool) {
-        // ⚠️ STUB — needs multi-session lifecycle in the live engine; the
-        // LegacyCore flag is inert. See docs/sdk-facade-status.md.
-        LegacyCore.shared.setMultiSessionRecord(enabled)
+        #if canImport(UIKit)
+        ReplayCore.shared.setMultiSessionRecord(enabled)
+        #endif
     }
 
     /// Register a callback that fires after the SDK's first

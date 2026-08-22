@@ -74,6 +74,40 @@ public final class ReplayCore {
     // Runtime auto screen-name toggle (set from config; flipped by
     // setAutomaticScreenNameTagging).
     private var autoScreenName = true
+
+    /// Screens the host has opted OUT of recording ("don't record this screen").
+    /// Matched case-insensitively against the auto-tagged / manually-tagged screen
+    /// name. While an excluded screen is foreground the FRAME loop is paused
+    /// (taps / network / console / perf keep flowing, mirroring pauseRecording);
+    /// it resumes on any non-excluded screen. Seeded from
+    /// ReplayConfig.excludedScreens and mutable at runtime via the facade.
+    private var excludedScreens: Set<String> = []
+    /// Whether the frame loop is currently paused BECAUSE of screen exclusion, so
+    /// we only pause/resume + log on an actual enter/leave transition.
+    private var framesExcluded = false
+
+    // ── Short break ("allow another app briefly") ────────────────────
+    /// When `allowShortBreak` is true a background gap ≤ `shortBreakWindow`
+    /// keeps the SAME session; a longer gap (or `allow=false`) rotates to a
+    /// fresh session on return, so a long absence can't inflate one multi-hour
+    /// session — the mobile analogue of the web SDK's inactivity rotation.
+    /// Default tolerates up to 30 min so brief/medium app-switches don't
+    /// fragment sessions. Set via `allowShortBreakForAnotherApp`.
+    private var allowShortBreak = true
+    private var shortBreakWindow: TimeInterval = 1800
+    /// Wall-clock (not monotonic — CACurrentMediaTime pauses while suspended)
+    /// timestamp of the last background, used to measure the break on return.
+    private var backgroundedAt: TimeInterval = 0
+
+    // ── Multi-session gate (record one session, or many) ─────────────
+    /// `enabled` → every rotation opens a new session (default). `notStarted`
+    /// → the current/next session is still allowed, then no more. `disabled`
+    /// → refuse to open any further session this process. Evaluated at the one
+    /// session-start chokepoint (`start()`), mirroring the reference's 3-state
+    /// model — cleaner than a "sessions so far" counter. Set via
+    /// `setMultiSessionRecord`.
+    private enum MultiSessionState { case enabled, notStarted, disabled }
+    private var multiSessionState: MultiSessionState = .enabled
     // Onboarding/verification callbacks, fired when /start succeeds.
     private var verificationListeners: [UUID: () -> Void] = [:]
 
@@ -99,6 +133,13 @@ public final class ReplayCore {
         // session while opted out (the legacy facade checked this; the live
         // engine didn't).
         if OptOutStore.shared.overallOptOut { return }
+        // Multi-session gate — the single place a session opens. `notStarted`
+        // allows exactly this one (then flips to `disabled`); `disabled` refuses.
+        switch multiSessionState {
+        case .disabled: return
+        case .notStarted: multiSessionState = .disabled
+        case .enabled: break
+        }
         starting = true
         let projectKey = config.apiKey
         let host = config.apiHost
@@ -106,6 +147,7 @@ public final class ReplayCore {
         self.host = host
         self.lastConfig = config
         self.autoScreenName = config.autoScreenName
+        self.excludedScreens = Set(config.excludedScreens.map { $0.lowercased() })
         let transport = MobileTransport(baseURL: host, projectKey: projectKey)
         self.transport = transport
 
@@ -148,7 +190,10 @@ public final class ReplayCore {
 
                 collector.start()
                 // captureSnapshotPixels=false → events only, no frames archive.
-                if config.captureSnapshotPixels { screenshots.start() }
+                // Also honour an exclusion that fired BEFORE start() finished (an
+                // excluded screen tagged during the async /start round-trip) —
+                // don't start the loop yet; it resumes on a non-excluded screen.
+                if config.captureSnapshotPixels && !self.framesExcluded { screenshots.start() }
                 // Flutter hosts pass captureTouch:false — the Dart layer
                 // reports taps with the real widget label via reportInteraction
                 // (the native view-tree only ever sees the one FlutterView).
@@ -221,6 +266,7 @@ public final class ReplayCore {
                 self.preStartLock.unlock()
 
                 self.active = true
+                NSLog("[ReplaySdk] session live: \(resp.sessionID)")
                 // Session is live — fire onboarding/verification listeners.
                 for listener in self.verificationListeners.values { listener() }
             }
@@ -242,6 +288,7 @@ public final class ReplayCore {
     public func stop() {
         active = false
         starting = false
+        framesExcluded = false
         screenshots?.stop(); screenshots = nil
         collector?.stop(); collector = nil
         touch.uninstall()
@@ -259,6 +306,53 @@ public final class ReplayCore {
 
     /// Toggle auto screen-name tagging at runtime.
     func setAutoScreenName(_ enabled: Bool) { autoScreenName = enabled }
+
+    // ── Screen exclusion ("don't record this screen") ────────────────
+    /// Replace the excluded-screens denylist.
+    func setExcludedScreens(_ names: [String]) {
+        excludedScreens = Set(names.map { $0.lowercased() })
+    }
+    /// Add one screen to the excluded set.
+    func excludeScreen(_ name: String) { excludedScreens.insert(name.lowercased()) }
+    /// Remove one screen from the excluded set (recording resumes next time it shows).
+    func unexcludeScreen(_ name: String) { excludedScreens.remove(name.lowercased()) }
+
+    // ── Advanced gestures / short break / multi-session ──────────────
+    /// Toggle pinch/rotate correlation in the touch capture.
+    func setAdvancedGestures(_ enabled: Bool) { MobileTouchCapture.advancedGesturesEnabled = enabled }
+
+    /// Configure the short-break policy (see `allowShortBreak`). A zero/negative
+    /// window keeps the current default rather than disabling the window.
+    func setAllowShortBreak(_ allow: Bool, windowSeconds: TimeInterval) {
+        allowShortBreak = allow
+        if windowSeconds > 0 { shortBreakWindow = windowSeconds }
+    }
+
+    /// Turn multi-session recording on/off. Off → the current/next session is
+    /// still allowed, then no further sessions open this process.
+    func setMultiSessionRecord(_ enabled: Bool) {
+        multiSessionState = enabled ? .enabled : .notStarted
+    }
+
+    /// Discard the current session WITHOUT uploading. Our engine streams
+    /// batches live every ~5s, so (unlike a deferred-upload model where cancel
+    /// is a pure local delete) we must signal the backend to DROP what already
+    /// landed, then clear the in-memory buffers and tear down — never flushing.
+    /// A fresh session can start afterward (the multi-session gate is untouched).
+    public func cancelSession() {
+        // Backend drop first, while the session token is still valid.
+        if let sid = sessionID { transport?.cancel(sessionID: sid) }
+        active = false
+        starting = false
+        framesExcluded = false
+        // discard() = the stop() counterpart that clears buffers WITHOUT flushing.
+        screenshots?.discard(); screenshots = nil
+        collector?.discard(); collector = nil
+        touch.uninstall()
+        NotificationCenter.default.removeObserver(self)
+        sessionID = nil
+        preStartLock.lock(); preStart.removeAll(); ready = false; preStartLock.unlock()
+    }
 
     /// End the current session and immediately start a fresh one using the
     /// config retained from the first start(). No-op before start() runs.
@@ -296,7 +390,7 @@ public final class ReplayCore {
         case "swipe": sendSwipe(label: label, x: x, y: y, direction: direction)
         case "tap": sendClick(label: label, x: x, y: y)
         default:
-            // long_press / double_tap / pinch → distinct gesture event.
+            // long_press / double_tap / pinch / rotate → distinct gesture event.
             enqueue(MobileWire.gesture(kind: kind, label: label, x: x, y: y, direction: direction, timestamp: nowMs()))
         }
     }
@@ -358,6 +452,22 @@ public final class ReplayCore {
     }
     func sendScreen(screenName: String, viewName: String, visible: Bool) {
         enqueue(MobileWire.viewComponent(screenName: screenName, viewName: viewName, visible: visible, timestamp: nowMs()))
+        // "Don't record this screen": pause the frame loop when we ENTER an
+        // excluded screen and resume when we LEAVE it (transition-gated so we
+        // don't churn pause/resume on every tag). Everything else (this event,
+        // taps, network, console, perf) keeps flowing.
+        guard visible else { return }
+        let excluded = excludedScreens.contains(screenName.lowercased())
+        if excluded != framesExcluded {
+            framesExcluded = excluded
+            if excluded {
+                pauseCapture()
+                NSLog("[ReplaySdk] screen-exclude: PAUSED frames on '\(screenName)'")
+            } else {
+                resumeCapture()
+                NSLog("[ReplaySdk] screen-exclude: RESUMED frames on '\(screenName)'")
+            }
+        }
     }
     public func sendEvent(name: String, payload: String) {
         // RN/Flutter forward console logs as the reserved `$console` event, so
@@ -382,12 +492,26 @@ public final class ReplayCore {
     }
     @objc private func onBackground() {
         sendPerformance(name: "background", value: 1)
+        // Stamp the break start (wall clock) so onForeground can size the gap.
+        backgroundedAt = Date().timeIntervalSince1970
         // Pause capture while backgrounded so we don't inflate the archive
         // with invisible-window frames; pause() flushes what's pending.
         screenshots?.pause()
         collector?.flush()
     }
     @objc private func onForeground() {
+        let elapsed = backgroundedAt > 0 ? (Date().timeIntervalSince1970 - backgroundedAt) : 0
+        backgroundedAt = 0
+        // Short-break policy: a gap longer than the tolerated window (or short
+        // breaks disallowed) rotates to a fresh session so a long absence can't
+        // extend one session for hours. startNewSession() is itself gated by the
+        // multi-session state machine, so a disabled multi-session simply ends
+        // recording instead of rotating.
+        if !allowShortBreak || elapsed > shortBreakWindow {
+            NSLog("[ReplaySdk] short-break: gap \(Int(elapsed))s > window \(Int(shortBreakWindow))s — rotating session")
+            startNewSession()
+            return
+        }
         sendPerformance(name: "background", value: 0)
         screenshots?.resume()
     }

@@ -181,14 +181,18 @@ final class GameViewController: UIViewController {
             }
             // Demo crash: raise an NSException (caught by the SDK's
             // uncaught-exception handler) so the Crashes tab is exercised.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.7) { [weak self] in
-                self?.setStatus("Simulating crash…", (0.98, 0.44, 0.52))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    NSException(
-                        name: NSExceptionName("ReplayDemoCrash"),
-                        reason: "Simulated crash from the Tic-Tac-Toe demo",
-                        userInfo: nil
-                    ).raise()
+            // Gated behind REPLAY_DEMO_CRASH=1 so gesture / short-break tests
+            // can keep the app alive.
+            if ProcessInfo.processInfo.environment["REPLAY_DEMO_CRASH"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4.7) { [weak self] in
+                    self?.setStatus("Simulating crash…", (0.98, 0.44, 0.52))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        NSException(
+                            name: NSExceptionName("ReplayDemoCrash"),
+                            reason: "Simulated crash from the Tic-Tac-Toe demo",
+                            userInfo: nil
+                        ).raise()
+                    }
                 }
             }
         }

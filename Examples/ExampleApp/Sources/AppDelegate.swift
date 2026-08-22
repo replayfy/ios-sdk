@@ -15,6 +15,14 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        // Multi-session gate must be set BEFORE start() to record exactly one
+        // session (setting it after start leaves the current session + one more
+        // allowed, per the reference's "current/next still allowed" semantics).
+        if ProcessInfo.processInfo.environment["REPLAY_MULTISESSION"] == "0" {
+            Replay.setMultiSessionRecord(false)
+            NSLog("[ReplayExample] multi-session DISABLED before start (one session this process)")
+        }
+
         // SDK boot. apiHost points at host machine's loopback as seen
         // from the simulator — `127.0.0.1` (or `localhost`) works
         // directly on iOS Simulator (unlike Android emulator's
@@ -24,10 +32,39 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             with: ReplayConfig(
                 apiKey: "rpl_pk_ef7e2fc8c7f952bcd0a69466e1a42a0625f9",
                 apiHost: "http://127.0.0.1:4000",
-                captureSnapshotPixels: true
+                captureSnapshotPixels: true,
+                // Demo: exclude the Menu screen from replay — frames pause while
+                // it's foreground and resume on "Game". (Screen-exclusion feature.)
+                excludedScreens: ["Menu"]
             )
         )
         NSLog("[ReplayExample] Replay.start dispatched — see ReplaySdk-tagged logs")
+
+        // Test scaffolding — drive the new engine features from launch env vars
+        // so scenarios can be exercised without a rebuild:
+        //   REPLAY_ADV_GESTURES=1        → enable pinch/rotate capture
+        //   REPLAY_SHORTBREAK_SECS=5     → short-break window (rotate after N s bg)
+        //   REPLAY_MULTISESSION=0        → record exactly one session this process
+        let env = ProcessInfo.processInfo.environment
+        if env["REPLAY_ADV_GESTURES"] == "1" {
+            Replay.enableAdvancedGestureRecognizer(true)
+            NSLog("[ReplayExample] advanced gestures ENABLED")
+        }
+        if let s = env["REPLAY_SHORTBREAK_SECS"], let secs = TimeInterval(s) {
+            Replay.allowShortBreakForAnotherApp(true, windowSeconds: secs)
+            NSLog("[ReplayExample] short-break window = \(secs)s")
+        }
+        if let s = env["REPLAY_CANCEL_AFTER_SECS"], let secs = TimeInterval(s) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + secs) {
+                NSLog("[ReplayExample] >>> calling cancelSession() — batches should STOP after this")
+                Replay.cancelSession()
+                // Prove a fresh session can still start after a cancel.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    NSLog("[ReplayExample] >>> calling startNewSession() after cancel")
+                    Replay.startNewSession()
+                }
+            }
+        }
 
         // Headless crash-test hook. Launch with
         //   SIMCTL_CHILD_REPLAY_AUTOCRASH=nsexception (or =signal)

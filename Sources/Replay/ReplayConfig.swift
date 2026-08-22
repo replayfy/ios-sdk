@@ -96,6 +96,12 @@ public struct ReplayConfig {
     /// `reportInteraction`, so native capture would only double-count.
     public let captureTouch: Bool
 
+    /// Screens to EXCLUDE from recording by name ("don't record this screen").
+    /// Case-insensitive; matched against the auto-tagged / `tagScreenName` name.
+    /// While an excluded screen is foreground the frame loop pauses (events keep
+    /// flowing). Mutable at runtime via `Replay.excludeScreen`/`setExcludedScreens`.
+    public let excludedScreens: [String]
+
     public init(
         apiKey: String,
         apiHost: String,
@@ -113,7 +119,8 @@ public struct ReplayConfig {
         snapshotInterval: TimeInterval = 0.5,
         autoScreenName: Bool = true,
         useRemoteConfig: Bool = true,
-        captureTouch: Bool = true
+        captureTouch: Bool = true,
+        excludedScreens: [String] = []
     ) {
         self.apiKey = apiKey
         self.apiHost = apiHost
@@ -132,5 +139,6 @@ public struct ReplayConfig {
         self.autoScreenName = autoScreenName
         self.useRemoteConfig = useRemoteConfig
         self.captureTouch = captureTouch
+        self.excludedScreens = excludedScreens
     }
 }

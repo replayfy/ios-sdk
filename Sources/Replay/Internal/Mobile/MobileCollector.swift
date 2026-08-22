@@ -31,6 +31,13 @@ final class MobileCollector {
         flush(late: true)
     }
 
+    /// Drop everything buffered WITHOUT sending — the cancelSession counterpart
+    /// to stop() (which flushes). Stops the flush timer so nothing else leaves.
+    func discard() {
+        timer?.invalidate(); timer = nil
+        lock.lock(); waiting.removeAll(); lock.unlock()
+    }
+
     /// Append a single already-encoded message.
     func add(_ message: Data) {
         lock.lock()
