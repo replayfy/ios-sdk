@@ -81,7 +81,7 @@ func application(_ application: UIApplication,
                  [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
     Replay.start(with: ReplayConfig(
         apiKey: "YOUR_API_KEY",
-        apiHost: "https://us.replayfy.app"
+        apiHost: "https://us.replayfy.app"  // or your self-hosted API URL
     ))
     return true
 }
@@ -95,7 +95,7 @@ struct MyApp: App {
     init() {
         Replay.start(with: ReplayConfig(
             apiKey: "YOUR_API_KEY",
-            apiHost: "https://us.replayfy.app"
+            apiHost: "https://us.replayfy.app"  // or your self-hosted API URL
         ))
     }
     var body: some Scene { WindowGroup { ContentView() } }
@@ -117,7 +117,7 @@ default. Pass any subset to `ReplayConfig(...)`.
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `apiKey` | `String` | **required** | Your project API key from the dashboard. |
-| `apiHost` | `String` | **required** | Ingest base URL, e.g. `https://us.replayfy.app`. |
+| `apiHost` | `String` | **required** | Ingest base URL, e.g. `https://us.replayfy.app` (or your self-hosted API URL). |
 | `projectId` | `String?` | `nil` | Only when one key covers multiple projects. |
 | `distinctId` | `String?` | `nil` | Known user id at start; otherwise an install-stable anonymous id is used. |
 | `flushInterval` | `TimeInterval` | `5` | Seconds between automatic uploads of the in-memory batch. |
@@ -144,7 +144,7 @@ All methods are static on the `Replay` type.
 ```swift
 // Boot the SDK and start recording. Call once at launch.
 Replay.start(with: ReplayConfig(apiKey: "YOUR_API_KEY",
-                                apiHost: "https://us.replayfy.app"))
+                                apiHost: "https://us.replayfy.app"))  // or your self-hosted API URL
 
 // End the current session and upload immediately. A new session starts
 // on the next foreground.
@@ -251,7 +251,7 @@ no frames at all. Seed the initial list at start via
 ```swift
 Replay.start(with: ReplayConfig(
     apiKey: "YOUR_API_KEY",
-    apiHost: "https://us.replayfy.app",
+    apiHost: "https://us.replayfy.app",  // or your self-hosted API URL
     excludedScreens: ["PinPad", "AccountRecovery"]
 ))
 ```
