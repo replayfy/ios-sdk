@@ -9,12 +9,33 @@ import CoreImage
 /// JPEG-compresses it, accumulates frames, and uploads a gzipped
 /// frames archive once `batchSize` frames have been collected.
 final class MobileScreenshots {
-    private let transport: MobileTransport
+    private let transport: MobileUploading
     private let privacy: () -> [MaskRect] // sensitive rects + style, window coords
+    /// Whether this engine screenshots the window itself. False for hosts that
+    /// push their own frames through `submitFrame` (Flutter's Dart-side
+    /// capture): the capture timer must then never run, including on resume.
+    private let nativeCapture: Bool
 
     private var timer: Timer?
     private let lock = NSLock()
     private var pending: [(data: Data, ts: UInt64)] = []
+    // Upload drain state, guarded by `lock`. One drain runs at a time so
+    // archives reach the server in capture order.
+    private var draining = false
+    /// Frames captured at or before this time go out even as a partial batch
+    /// (a pause, resume or stop asked for everything up to that moment);
+    /// later frames wait for a full batch. 0 = full batches only.
+    private var flushThroughTs: UInt64 = 0
+    private var roundsLeft = 0
+    /// A flush arrived while a round was in flight. If that round fails, the
+    /// request still gets its own attempt (a resume right after suspension,
+    /// whose stale in-flight upload then fails, must not be lost).
+    private var requestedDuringRound = false
+    private var drainWaiters: [() -> Void] = []
+    /// stop() or discard() ran: the capture timer must never start again.
+    private var stopped = false
+    /// discard() ran: drop everything and send nothing more.
+    private var discarded = false
 
     // Server-tunable via setSettings.
     private var captureInterval: TimeInterval = 1.0 / 3.0 // 3 fps default
@@ -22,9 +43,13 @@ final class MobileScreenshots {
     private let screenScale: CGFloat = 1.25
     private let batchSize = 20
     private let maxBuffered = 500
+    /// Archives one drain may send. Bounds a drain whose buffer refills as fast
+    /// as it uploads, so it (and a background task waiting on it) still ends.
+    private let maxDrainRounds = 30
 
-    init(transport: MobileTransport, privacyRects: @escaping () -> [MaskRect]) {
+    init(transport: MobileUploading, nativeCapture: Bool, privacyRects: @escaping () -> [MaskRect]) {
         self.transport = transport
+        self.nativeCapture = nativeCapture
         self.privacy = privacyRects
     }
 
@@ -40,6 +65,7 @@ final class MobileScreenshots {
 
     func start() {
         DispatchQueue.main.async {
+            guard !self.isStopped else { return }
             self.capture()
             self.timer = Timer.scheduledTimer(withTimeInterval: self.captureInterval, repeats: true) { [weak self] _ in
                 self?.capture()
@@ -47,35 +73,53 @@ final class MobileScreenshots {
         }
     }
 
+    /// Session end: stop capturing and upload everything buffered.
     func stop() {
+        lock.lock(); stopped = true; lock.unlock()
         timer?.invalidate(); timer = nil
-        flush()
+        flush(all: true)
     }
 
     /// Drop pending frames WITHOUT uploading — the cancelSession counterpart to
     /// stop() (which flushes). Invalidate synchronously when already on main so
     /// no capture fires between here and teardown.
+    /// The buffer is cleared at once, under the lock, so a running drain
+    /// stops before its next round even when this is called off the main
+    /// thread.
     func discard() {
-        let clear = {
-            self.timer?.invalidate(); self.timer = nil
-            self.lock.lock(); self.pending.removeAll(); self.lock.unlock()
-        }
+        lock.lock()
+        stopped = true
+        discarded = true
+        pending.removeAll()
+        lock.unlock()
+        let clear = { self.timer?.invalidate(); self.timer = nil }
         if Thread.isMainThread { clear() } else { DispatchQueue.main.async(execute: clear) }
     }
 
-    /// Suspend capture while backgrounded — shooting an invisible window
-    /// just inflates the archive. Flushes what's pending.
-    func pause() {
+    /// Suspend capture (backgrounding, or an excluded screen) and upload
+    /// everything buffered — shooting an invisible window just inflates the
+    /// archive. Never discards: frames that fail to send (suspension cancels
+    /// in-flight requests) stay queued and go out on `resume()`. `completion`
+    /// runs once the uploads settle, so the caller can hold a background task
+    /// open until then.
+    func pause(completion: (() -> Void)? = nil) {
         DispatchQueue.main.async {
             self.timer?.invalidate(); self.timer = nil
-            self.flush()
+            self.flush(all: true, completion: completion)
         }
     }
 
-    /// Resume capture on return to the foreground.
+    /// Resume after `pause()`. First push whatever the pause could not get
+    /// out before suspension; then restart the capture timer, but only when
+    /// this engine screenshots natively. Host-fed capture (Flutter) never
+    /// starts the timer — restarting it here began native screenshots after
+    /// the first background, without the host's occlusion rects.
     func resume() {
+        flush(all: true)
+        guard nativeCapture else { return }
         DispatchQueue.main.async {
-            guard self.timer == nil else { return }
+            // A stop() between the resume and this block must win.
+            guard !self.isStopped, self.timer == nil else { return }
             self.capture()
             self.timer = Timer.scheduledTimer(withTimeInterval: self.captureInterval, repeats: true) { [weak self] _ in
                 self?.capture()
@@ -231,21 +275,115 @@ final class MobileScreenshots {
         }
     }
 
-    func flush() {
+    /// Upload buffered frames oldest first, one archive of at most `batchSize`
+    /// frames per request. `all: false` (a batch just filled) sends full
+    /// batches only. `all: true` (pause, resume, stop) also sends a partial
+    /// batch of the frames captured up to now; frames captured afterwards
+    /// keep filling a batch. A failed upload puts its frames back at the front
+    /// and ends the drain, so nothing is dropped and a retry can't spin.
+    /// `completion` runs once the drain settles.
+    func flush(all: Bool = false, completion: (() -> Void)? = nil) {
         lock.lock()
-        guard !pending.isEmpty else { lock.unlock(); return }
-        let frames = pending
-        pending.removeAll()
+        if discarded {
+            lock.unlock()
+            completion?()
+            return
+        }
+        if all {
+            flushThroughTs = max(flushThroughTs, nowMs())
+            roundsLeft = maxDrainRounds
+        }
+        if let completion { drainWaiters.append(completion) }
+        if draining {
+            // The running drain picks up the new frames, the wider scope and
+            // the waiter. A pause/resume/stop request also earns its own
+            // attempt if the in-flight round fails.
+            if all { requestedDuringRound = true }
+            lock.unlock()
+            return
+        }
+        draining = true
+        if !all { roundsLeft = maxDrainRounds }
+        lock.unlock()
+        drainNext()
+    }
+
+    /// One drain round. The upload callback holds `self` strongly on purpose:
+    /// `ReplayCore.stop()` releases this object right after `stop()`, and the
+    /// drain must still finish sending the session's last frames.
+    private func drainNext() {
+        lock.lock()
+        let forced = pending.first.map { $0.ts <= flushThroughTs } ?? false
+        guard !discarded, roundsLeft > 0, !pending.isEmpty, forced || pending.count >= batchSize else {
+            finishDrainLocked()
+            return
+        }
+        roundsLeft -= 1
+        requestedDuringRound = false
+        let frames = Array(pending.prefix(batchSize))
+        pending.removeFirst(frames.count)
         lock.unlock()
 
-        guard let archive = MobileFrames.archive(frames) else { return }
-        transport.sendImages(archive) { [weak self] success in
-            if !success {
-                self?.lock.lock()
-                self?.pending.insert(contentsOf: frames, at: 0)
-                self?.lock.unlock()
-            }
+        guard let archive = MobileFrames.archive(frames) else {
+            // Compression failed: skip this batch rather than retry it forever.
+            drainNext()
+            return
         }
+        transport.sendImages(archive) { success in
+            if success {
+                self.drainNext()
+                return
+            }
+            self.lock.lock()
+            guard !self.discarded else {
+                self.finishDrainLocked()
+                return
+            }
+            self.pending.insert(contentsOf: frames, at: 0)
+            if self.pending.count > self.maxBuffered {
+                self.pending.removeFirst(self.pending.count - self.maxBuffered)
+            }
+            if self.requestedDuringRound {
+                // Someone asked for a flush while this upload was in flight:
+                // give that request its own attempt.
+                self.lock.unlock()
+                self.drainNext()
+                return
+            }
+            self.finishDrainLocked()
+        }
+    }
+
+    /// Ends the drain and runs its waiters. Call with `lock` held; releases it.
+    private func finishDrainLocked() {
+        let waiters = drainWaiters
+        drainWaiters.removeAll()
+        draining = false
+        flushThroughTs = 0
+        roundsLeft = 0
+        requestedDuringRound = false
+        lock.unlock()
+        waiters.forEach { $0() }
+    }
+
+    private var isStopped: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return stopped
+    }
+
+    /// Frames waiting to upload. For tests.
+    var pendingCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return pending.count
+    }
+
+    /// Whether the native capture timer is running. For tests.
+    var isCapturing: Bool { timer != nil }
+
+    /// Whether an upload drain is running. For tests.
+    var isDraining: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return draining
     }
 }
 #endif
