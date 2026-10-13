@@ -38,7 +38,7 @@ Pod::Spec.new do |spec|
   DESC
 
   spec.homepage     = "https://replayfy.app"
-  spec.license      = { :type => "BSD-3-Clause", :file => "LICENSE" }
+  spec.license      = { :type => "MIT", :file => "LICENSE" }
   spec.author       = { "Replayfy" => "hello@replayfy.app" }
   spec.source       = {
     :git => "https://github.com/replayfy/ios-sdk.git",
