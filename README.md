@@ -49,7 +49,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/replayfy/ios-sdk.git", from: "0.0.4")
+    .package(url: "https://github.com/replayfy/ios-sdk.git", from: "0.0.5")
 ],
 targets: [
     .target(
@@ -66,7 +66,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'Replayfy', '~> 0.0.4'
+pod 'Replayfy', '~> 0.0.5'
 ```
 
 ## Quick start
