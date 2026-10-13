@@ -384,8 +384,16 @@ public final class ReplayCore {
     /// config retained from the first start(). No-op before start() runs.
     func startNewSession() {
         guard let cfg = lastConfig else { return }
+        // A rotation doesn't change what is on screen: keep the exclusions set
+        // at runtime (start() re-seeds them from the config) and whether an
+        // excluded screen is in front, so its frames stay paused in the new
+        // session until the user leaves it.
+        let screens = excludedScreens
+        let excluded = framesExcluded
         stop()
         start(config: cfg)
+        excludedScreens = screens
+        framesExcluded = excluded
     }
 
     /// Register an onboarding/verification callback fired when /start
