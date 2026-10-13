@@ -123,5 +123,5 @@ final class SessionRuntime {
 /// same values without duplicating string literals.
 enum BuildInfo {
     static let sdkName = "@replay/ios-sdk"
-    static let sdkVersion = "0.0.1"
+    static let sdkVersion = "0.0.5"
 }

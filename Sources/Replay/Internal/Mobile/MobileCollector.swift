@@ -5,7 +5,7 @@ import Foundation
 /// 500 KB batch cap). Each flush is prefixed with a `batchMeta`
 /// carrying the monotonic message index, then gzipped.
 final class MobileCollector {
-    private let transport: MobileTransport
+    private let transport: MobileUploading
     private let lock = NSLock()
     private var waiting: [Data] = []
     private var nextIndex: UInt64 = 0
@@ -13,8 +13,19 @@ final class MobileCollector {
 
     private let maxBatchBytes = 500_000
     private let flushInterval: TimeInterval = 5
+    /// Batches one drain may send. Bounds a drain whose queue refills as fast
+    /// as it uploads, so it (and a background task waiting on it) still ends.
+    private let maxDrainRounds = 20
 
-    init(transport: MobileTransport) {
+    // Send state, guarded by `lock`. One request is in flight at a time, so a
+    // failed batch put back at the front of the queue keeps message order.
+    private var sending = false
+    private var roundsLeft = 0
+    /// Session end: the batch that empties the queue goes to /late.
+    private var lateRequested = false
+    private var sendWaiters: [() -> Void] = []
+
+    init(transport: MobileUploading) {
         self.transport = transport
     }
 
@@ -26,9 +37,12 @@ final class MobileCollector {
         }
     }
 
+    /// Session end: send everything queued, the last batch via /late (the
+    /// server's end-of-session signal). The send callbacks hold `self`, so the
+    /// drain finishes after ReplayCore drops its reference.
     func stop() {
         timer?.invalidate(); timer = nil
-        flush(late: true)
+        request(drain: true, late: true, completion: nil)
     }
 
     /// Drop everything buffered WITHOUT sending — the cancelSession counterpart
@@ -47,14 +61,53 @@ final class MobileCollector {
         if total > Int(Double(maxBatchBytes) * 0.8) { flush() }
     }
 
-    func flush(late: Bool = false) {
+    /// Send one batch (at most `maxBatchBytes`). A no-op while a send is in
+    /// flight: the 5 s timer or the next size trigger picks the queue up.
+    func flush() {
+        request(drain: false, late: false, completion: nil)
+    }
+
+    /// Send EVERY queued batch, one at a time, until the queue is empty, a send
+    /// fails (that batch goes back to the front of the queue), or
+    /// `maxDrainRounds` is hit. `flush()` sends a single batch, which on
+    /// backgrounding left the rest of the queue for a later timer tick the
+    /// suspended app never reached. `completion` runs once the drain settles.
+    func drain(completion: (() -> Void)? = nil) {
+        request(drain: true, late: false, completion: completion)
+    }
+
+    private func request(drain: Bool, late: Bool, completion: (() -> Void)?) {
         lock.lock()
-        guard !waiting.isEmpty else { lock.unlock(); return }
+        if drain { roundsLeft = maxDrainRounds }
+        if late { lateRequested = true }
+        if let completion { sendWaiters.append(completion) }
+        if sending {
+            // The send in flight continues into the wider request.
+            lock.unlock()
+            return
+        }
+        sending = true
+        if !drain { roundsLeft = 1 }
+        lock.unlock()
+        sendNext()
+    }
+
+    private func sendNext() {
+        lock.lock()
+        guard roundsLeft > 0, !waiting.isEmpty else {
+            finishSendingLocked()
+            return
+        }
+        roundsLeft -= 1
         var batch: [Data] = []
         var size = 0
-        while let first = waiting.first, size + first.count <= maxBatchBytes {
+        // Always take at least one message: one larger than the cap would
+        // otherwise never leave the head of the queue, and every send would be
+        // an empty batch.
+        while let first = waiting.first, batch.isEmpty || size + first.count <= maxBatchBytes {
             batch.append(first); waiting.removeFirst(); size += first.count
         }
+        let late = lateRequested && waiting.isEmpty
         let startIndex = nextIndex
         nextIndex += UInt64(batch.count)
         lock.unlock()
@@ -63,18 +116,45 @@ final class MobileCollector {
         for m in batch { content.append(m) }
 
         if late {
-            transport.sendLateMessages(content) { _ in }
+            // Fire-and-forget, as before: the session is over.
+            transport.sendLateMessages(content) { _ in
+                self.lock.lock()
+                self.finishSendingLocked()
+            }
             return
         }
-        guard let gz = MobileGzip.compress(content) else { return }
-        transport.sendMessages(gz) { [weak self] success in
-            if !success {
-                // Re-queue on failure (front of line, preserve order).
-                self?.lock.lock()
-                self?.waiting.insert(contentsOf: batch, at: 0)
-                self?.lock.unlock()
-            }
+        guard let gz = MobileGzip.compress(content) else {
+            sendNext()
+            return
         }
+        transport.sendMessages(gz) { success in
+            if success {
+                self.sendNext()
+                return
+            }
+            // Re-queue on failure (front of line, preserve order) and stop.
+            self.lock.lock()
+            self.waiting.insert(contentsOf: batch, at: 0)
+            self.finishSendingLocked()
+        }
+    }
+
+    /// Ends the send loop and runs its waiters. Call with `lock` held;
+    /// releases it.
+    private func finishSendingLocked() {
+        let waiters = sendWaiters
+        sendWaiters.removeAll()
+        sending = false
+        roundsLeft = 0
+        lateRequested = false
+        lock.unlock()
+        waiters.forEach { $0() }
+    }
+
+    /// Messages waiting to send. For tests.
+    var waitingCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return waiting.count
     }
 
     /// Synchronous flush — used by the crash handler so the crash reaches

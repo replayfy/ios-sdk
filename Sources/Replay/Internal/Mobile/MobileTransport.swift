@@ -21,6 +21,15 @@ struct MobileStartResponse: Decodable {
     let record: Bool?
 }
 
+/// The upload half of `MobileTransport` that the frame and message buffers
+/// drain into. A protocol so the drain/retry logic can be exercised against a
+/// stub in tests. `completion(true)` means the server accepted the batch.
+protocol MobileUploading: AnyObject {
+    func sendMessages(_ gzippedBatch: Data, completion: @escaping (Bool) -> Void)
+    func sendLateMessages(_ batch: Data, completion: @escaping (Bool) -> Void)
+    func sendImages(_ gzippedArchive: Data, completion: @escaping (Bool) -> Void)
+}
+
 /// HTTP transport for the mobile ingest endpoints.
 ///
 ///   POST {host}/v1/mobile/start   → JSON device params, returns token
@@ -31,7 +40,7 @@ struct MobileStartResponse: Decodable {
 /// `/start` is project-key authed (the key rides in the JSON body);
 /// the data endpoints use the session token as `Authorization:
 /// Bearer`. The response envelope wraps payloads in `{ data: … }`.
-final class MobileTransport {
+final class MobileTransport: MobileUploading {
     private let baseURL: String
     private let projectKey: String
     private var token: String?

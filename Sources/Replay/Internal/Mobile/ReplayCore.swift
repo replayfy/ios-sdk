@@ -85,6 +85,14 @@ public final class ReplayCore {
     /// Whether the frame loop is currently paused BECAUSE of screen exclusion, so
     /// we only pause/resume + log on an actual enter/leave transition.
     private var framesExcluded = false
+    /// The host paused frames (pauseRecording / optOutOfSchematicRecordings).
+    /// Survives backgrounding and session rotation; a process restart resets
+    /// it (the opt-out itself is persisted in OptOutStore).
+    private var hostPaused = false
+    /// Frames must not be captured or accepted right now, for any reason.
+    private var framesHeld: Bool {
+        framesExcluded || hostPaused || OptOutStore.shared.schematicOptOut
+    }
 
     // ── Short break ("allow another app briefly") ────────────────────
     /// When `allowShortBreak` is true a background gap ≤ `shortBreakWindow`
@@ -98,6 +106,12 @@ public final class ReplayCore {
     /// Wall-clock (not monotonic — CACurrentMediaTime pauses while suspended)
     /// timestamp of the last background, used to measure the break on return.
     private var backgroundedAt: TimeInterval = 0
+    /// One per background cycle, held until that cycle's frame + message
+    /// drains settle. Without it iOS may suspend the app as soon as
+    /// didEnterBackground returns, cancelling those uploads. Per cycle so an
+    /// earlier cycle's completion can't end a task a later cycle still needs.
+    /// Main thread only.
+    private var backgroundTasks = Set<UIBackgroundTaskIdentifier>()
 
     // ── Multi-session gate (record one session, or many) ─────────────
     /// `enabled` → every rotation opens a new session (default). `notStarted`
@@ -183,7 +197,11 @@ public final class ReplayCore {
                 }
 
                 let collector = MobileCollector(transport: transport)
-                let screenshots = MobileScreenshots(transport: transport, privacyRects: { self.privacyRectsProvider() })
+                let screenshots = MobileScreenshots(
+                    transport: transport,
+                    nativeCapture: config.captureSnapshotPixels,
+                    privacyRects: { self.privacyRectsProvider() }
+                )
                 screenshots.setSettings(fps: resp.fps, quality: resp.quality)
                 self.collector = collector
                 self.screenshots = screenshots
@@ -193,7 +211,7 @@ public final class ReplayCore {
                 // Also honour an exclusion that fired BEFORE start() finished (an
                 // excluded screen tagged during the async /start round-trip) —
                 // don't start the loop yet; it resumes on a non-excluded screen.
-                if config.captureSnapshotPixels && !self.framesExcluded { screenshots.start() }
+                if config.captureSnapshotPixels && !self.framesHeld { screenshots.start() }
                 // Flutter hosts pass captureTouch:false — the Dart layer
                 // reports taps with the real widget label via reportInteraction
                 // (the native view-tree only ever sees the one FlutterView).
@@ -298,11 +316,19 @@ public final class ReplayCore {
     }
 
     // ── Lifecycle controls (facade re-homes, #119) ───────────────────
-    /// Pause periodic screenshot capture; events keep flowing.
-    func pauseCapture() { screenshots?.pause() }
+    /// Host pause (pauseRecording / schematic opt-out): stop frames until
+    /// resumeCapture(); events keep flowing. Holds across background/foreground.
+    func pauseCapture() {
+        hostPaused = true
+        screenshots?.pause()
+    }
 
-    /// Resume periodic screenshot capture.
-    func resumeCapture() { screenshots?.resume() }
+    /// Host resume. Frames restart unless something else still holds them
+    /// (an excluded screen in front, a persisted schematic opt-out).
+    func resumeCapture() {
+        hostPaused = false
+        if !framesHeld { screenshots?.resume() }
+    }
 
     /// Toggle auto screen-name tagging at runtime.
     func setAutoScreenName(_ enabled: Bool) { autoScreenName = enabled }
@@ -358,8 +384,16 @@ public final class ReplayCore {
     /// config retained from the first start(). No-op before start() runs.
     func startNewSession() {
         guard let cfg = lastConfig else { return }
+        // A rotation doesn't change what is on screen: keep the exclusions set
+        // at runtime (start() re-seeds them from the config) and whether an
+        // excluded screen is in front, so its frames stay paused in the new
+        // session until the user leaves it.
+        let screens = excludedScreens
+        let excluded = framesExcluded
         stop()
         start(config: cfg)
+        excludedScreens = screens
+        framesExcluded = excluded
     }
 
     /// Register an onboarding/verification callback fired when /start
@@ -406,6 +440,9 @@ public final class ReplayCore {
     /// capture). `rects` are in PNG-pixel coords; `styles[i]` is the raw
     /// `ReplayMaskStyle` index for `rects[i]`, falling back to the global style.
     func submitFrame(_ png: Data, rects: [CGRect], styles: [Int]) {
+        // Host-fed frames obey the same holds as native capture: an excluded
+        // screen, pauseRecording and the schematic opt-out.
+        guard !framesHeld else { return }
         let global = PrivacyRegistry.shared.maskStyle
         let maskRects = rects.enumerated().map { i, r -> MaskRect in
             let style = i < styles.count ? (ReplayMaskStyle(rawValue: styles[i]) ?? global) : global
@@ -461,10 +498,10 @@ public final class ReplayCore {
         if excluded != framesExcluded {
             framesExcluded = excluded
             if excluded {
-                pauseCapture()
+                screenshots?.pause()
                 NSLog("[ReplaySdk] screen-exclude: PAUSED frames on '\(screenName)'")
-            } else {
-                resumeCapture()
+            } else if !framesHeld {
+                screenshots?.resume()
                 NSLog("[ReplaySdk] screen-exclude: RESUMED frames on '\(screenName)'")
             }
         }
@@ -494,10 +531,24 @@ public final class ReplayCore {
         sendPerformance(name: "background", value: 1)
         // Stamp the break start (wall clock) so onForeground can size the gap.
         backgroundedAt = Date().timeIntervalSince1970
-        // Pause capture while backgrounded so we don't inflate the archive
-        // with invisible-window frames; pause() flushes what's pending.
-        screenshots?.pause()
-        collector?.flush()
+        // Upload everything buffered before iOS suspends the app, holding a
+        // background task until both drains settle. Frames upload only once a
+        // batch fills, so without this every frame captured since the last
+        // full batch was lost whenever the app was suspended or killed in the
+        // background. pause() also stops capture so we don't inflate the
+        // archive with invisible-window frames. Neither drain discards
+        // anything: what misses the window goes out on onForeground.
+        let task = beginBackgroundTask()
+        let drains = DispatchGroup()
+        if let screenshots {
+            drains.enter()
+            screenshots.pause { drains.leave() }
+        }
+        if let collector {
+            drains.enter()
+            collector.drain { drains.leave() }
+        }
+        drains.notify(queue: .main) { [weak self] in self?.endBackgroundTask(task) }
     }
     @objc private func onForeground() {
         let elapsed = backgroundedAt > 0 ? (Date().timeIntervalSince1970 - backgroundedAt) : 0
@@ -513,7 +564,38 @@ public final class ReplayCore {
             return
         }
         sendPerformance(name: "background", value: 0)
-        screenshots?.resume()
+        // Push what the background window could not get out (suspension
+        // cancels in-flight uploads), rather than waiting for the next full
+        // batch or timer tick. An excluded screen still in front keeps its
+        // frames paused, as does a host pause or opt-out; only leftovers go.
+        if framesHeld {
+            screenshots?.flush(all: true)
+        } else {
+            screenshots?.resume()
+        }
+        collector?.flush()
+    }
+
+    private func beginBackgroundTask() -> UIBackgroundTaskIdentifier {
+        var task: UIBackgroundTaskIdentifier = .invalid
+        task = UIApplication.shared.beginBackgroundTask(withName: "ReplayfyUpload") { [weak self] in
+            // Out of background time: in-flight uploads fail and re-queue
+            // themselves, so ending the task here loses nothing.
+            self?.endBackgroundTask(task)
+        }
+        if task != .invalid { backgroundTasks.insert(task) }
+        return task
+    }
+
+    /// Reached from the drain completion and from the expiration handler, so
+    /// hop to main: UIApplication is main-thread-only, and the set makes a
+    /// second end of the same task a no-op.
+    private func endBackgroundTask(_ task: UIBackgroundTaskIdentifier) {
+        let end = {
+            guard self.backgroundTasks.remove(task) != nil else { return }
+            UIApplication.shared.endBackgroundTask(task)
+        }
+        if Thread.isMainThread { end() } else { DispatchQueue.main.async(execute: end) }
     }
 
     // ── /start device params ─────────────────────────────────────────
