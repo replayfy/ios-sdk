@@ -85,14 +85,25 @@ public final class ReplayCore {
     /// Whether the frame loop is currently paused BECAUSE of screen exclusion, so
     /// we only pause/resume + log on an actual enter/leave transition.
     private var framesExcluded = false
-    /// The host paused frames (pauseRecording / optOutOfSchematicRecordings).
-    /// Survives backgrounding and session rotation; a process restart resets
-    /// it (the opt-out itself is persisted in OptOutStore).
+    /// The host paused frames (pauseRecording). Survives backgrounding and
+    /// session rotation; a process restart resets it. The schematic opt-out is
+    /// a hold of its own, persisted in OptOutStore (see setSchematicOptOut).
     private var hostPaused = false
     /// Frames must not be captured or accepted right now, for any reason.
     private var framesHeld: Bool {
         framesExcluded || hostPaused || OptOutStore.shared.schematicOptOut
     }
+    /// The app is in the background: between onBackground and onForeground,
+    /// or from a session going live there (attachFrames) to onForeground.
+    /// Not a hold (nothing to lift), but no frame is taken meanwhile: the
+    /// background task keeps the app running for a while, and frames of a
+    /// screen nobody sees would only push the session's last upload later.
+    /// Changed on the main thread, like the holds (see onMain).
+    private var inBackground = false
+    /// The app's state as UIKit reports it, read as a session goes live.
+    /// Internal so tests can stand in for UIKit: the test runner can't be
+    /// sent to the background.
+    var applicationState: () -> UIApplication.State = { UIApplication.shared.applicationState }
 
     // ── Short break ("allow another app briefly") ────────────────────
     /// When `allowShortBreak` is true a background gap ≤ `shortBreakWindow`
@@ -204,14 +215,10 @@ public final class ReplayCore {
                 )
                 screenshots.setSettings(fps: resp.fps, quality: resp.quality)
                 self.collector = collector
-                self.screenshots = screenshots
 
                 collector.start()
                 // captureSnapshotPixels=false → events only, no frames archive.
-                // Also honour an exclusion that fired BEFORE start() finished (an
-                // excluded screen tagged during the async /start round-trip) —
-                // don't start the loop yet; it resumes on a non-excluded screen.
-                if config.captureSnapshotPixels && !self.framesHeld { screenshots.start() }
+                self.attachFrames(screenshots, nativeCapture: config.captureSnapshotPixels)
                 // Flutter hosts pass captureTouch:false — the Dart layer
                 // reports taps with the real widget label via reportInteraction
                 // (the native view-tree only ever sees the one FlutterView).
@@ -303,6 +310,25 @@ public final class ReplayCore {
         }
     }
 
+    /// Hand the live session its frame buffer, and start native capture
+    /// unless a hold that began before the session went live says not yet (an
+    /// excluded screen tagged during the async /start round-trip, a host
+    /// pause, a persisted opt-out) or the app is in the background; capture
+    /// then starts when the hold lifts or the app returns.
+    /// Internal so tests can drive the engine's holds against a stub upload
+    /// path, without the /start round-trip.
+    func attachFrames(_ screenshots: MobileScreenshots, nativeCapture: Bool) {
+        self.screenshots = screenshots
+        // The lifecycle observers come and go with the session, so they never
+        // saw a background that began before this session went live: one
+        // restarted there (startNewSession, stop + start), or opened by a
+        // background launch (a silent push or background fetch running
+        // didFinishLaunching). Ask UIKit. The observers are registered in this
+        // same main-thread pass, so the return can't slip in between.
+        inBackground = applicationState() == .background
+        if nativeCapture && !framesHeld && !inBackground { screenshots.start() }
+    }
+
     public func stop() {
         active = false
         starting = false
@@ -316,18 +342,61 @@ public final class ReplayCore {
     }
 
     // ── Lifecycle controls (facade re-homes, #119) ───────────────────
-    /// Host pause (pauseRecording / schematic opt-out): stop frames until
-    /// resumeCapture(); events keep flowing. Holds across background/foreground.
+    /// Host pause (pauseRecording): stop frames until resumeCapture(); events
+    /// keep flowing. Holds across background/foreground.
     func pauseCapture() {
-        hostPaused = true
-        screenshots?.pause()
+        onMain {
+            self.hostPaused = true
+            self.screenshots?.pause()
+        }
     }
 
     /// Host resume. Frames restart unless something else still holds them
-    /// (an excluded screen in front, a persisted schematic opt-out).
+    /// (an excluded screen in front, a persisted schematic opt-out) or the app
+    /// is in the background (onForeground restarts them).
     func resumeCapture() {
-        hostPaused = false
-        if !framesHeld { screenshots?.resume() }
+        onMain {
+            self.hostPaused = false
+            if !self.framesHeld && !self.inBackground { self.screenshots?.resume() }
+        }
+    }
+
+    /// Schematic opt-out (Replay.optOutOfSchematicRecordings): persisted, and
+    /// applied to the live engine like pauseCapture / resumeCapture. Not the
+    /// same hold: opting back in must not lift a pauseRecording still in
+    /// effect (a consent sync on every launch would restart frames on a PIN
+    /// screen).
+    func setSchematicOptOut(_ optOut: Bool) {
+        // Written at once, on the caller's thread: host-fed frames are refused
+        // from here on, and isOptedOutOfSchematicRecordings reads it back as
+        // soon as the call returns. Whether it changed is only visible before
+        // the write, hence the write here rather than by the caller.
+        let changed = OptOutStore.shared.schematicOptOut != optOut
+        OptOutStore.shared.schematicOptOut = optOut
+        // Act only on an actual change, so a repeated call doesn't flush a
+        // partial archive.
+        guard changed else { return }
+        onMain {
+            // Another hold keeps frames paused either way.
+            guard !self.framesExcluded, !self.hostPaused else { return }
+            if optOut {
+                self.screenshots?.pause()
+            } else if !self.inBackground {
+                self.screenshots?.resume()
+            }
+        }
+    }
+
+    /// Changes to the holds and to `inBackground` happen on the main thread,
+    /// where the lifecycle observers and the capture timer run. A host may
+    /// call from any thread (the React Native bridge calls from its own module
+    /// queue). Off main, a resume that saw the app in front could restart
+    /// capture just after onBackground had stopped it. On main the work runs
+    /// inline, so a frame reported right after a pause is refused. Off main
+    /// it is queued, in call order. (stop() and cancelSession() still run on
+    /// the caller's thread.)
+    private func onMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
     /// Toggle auto screen-name tagging at runtime.
@@ -441,8 +510,11 @@ public final class ReplayCore {
     /// `ReplayMaskStyle` index for `rects[i]`, falling back to the global style.
     func submitFrame(_ png: Data, rects: [CGRect], styles: [Int]) {
         // Host-fed frames obey the same holds as native capture: an excluded
-        // screen, pauseRecording and the schematic opt-out.
-        guard !framesHeld else { return }
+        // screen, pauseRecording and the schematic opt-out. Nor are they taken
+        // in the background: pause() stops only the native timer, and the
+        // host's own (Flutter's Dart timer) keeps firing for as long as the
+        // background task keeps the app running.
+        guard !framesHeld, !inBackground else { return }
         let global = PrivacyRegistry.shared.maskStyle
         let maskRects = rects.enumerated().map { i, r -> MaskRect in
             let style = i < styles.count ? (ReplayMaskStyle(rawValue: styles[i]) ?? global) : global
@@ -491,17 +563,20 @@ public final class ReplayCore {
         enqueue(MobileWire.viewComponent(screenName: screenName, viewName: viewName, visible: visible, timestamp: nowMs()))
         // "Don't record this screen": pause the frame loop when we ENTER an
         // excluded screen and resume when we LEAVE it (transition-gated so we
-        // don't churn pause/resume on every tag). Everything else (this event,
-        // taps, network, console, perf) keeps flowing.
+        // don't churn pause/resume on every tag). Leaving one doesn't restart
+        // frames another hold keeps, nor in the background (onForeground
+        // restarts them). Everything else (this event, taps, network, console,
+        // perf) keeps flowing.
         guard visible else { return }
         let excluded = excludedScreens.contains(screenName.lowercased())
-        if excluded != framesExcluded {
-            framesExcluded = excluded
+        onMain {
+            guard excluded != self.framesExcluded else { return }
+            self.framesExcluded = excluded
             if excluded {
-                screenshots?.pause()
+                self.screenshots?.pause()
                 NSLog("[ReplaySdk] screen-exclude: PAUSED frames on '\(screenName)'")
-            } else if !framesHeld {
-                screenshots?.resume()
+            } else if !self.framesHeld && !self.inBackground {
+                self.screenshots?.resume()
                 NSLog("[ReplaySdk] screen-exclude: RESUMED frames on '\(screenName)'")
             }
         }
@@ -522,12 +597,14 @@ public final class ReplayCore {
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────
-    private func registerLifecycle() {
+    /// Internal so tests can wire it and post the notifications themselves.
+    func registerLifecycle() {
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(onBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
         nc.addObserver(self, selector: #selector(onForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
     }
     @objc private func onBackground() {
+        inBackground = true
         sendPerformance(name: "background", value: 1)
         // Stamp the break start (wall clock) so onForeground can size the gap.
         backgroundedAt = Date().timeIntervalSince1970
@@ -551,6 +628,7 @@ public final class ReplayCore {
         drains.notify(queue: .main) { [weak self] in self?.endBackgroundTask(task) }
     }
     @objc private func onForeground() {
+        inBackground = false
         let elapsed = backgroundedAt > 0 ? (Date().timeIntervalSince1970 - backgroundedAt) : 0
         backgroundedAt = 0
         // Short-break policy: a gap longer than the tolerated window (or short

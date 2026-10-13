@@ -247,7 +247,8 @@ final class MobileBackgroundDrainTests: XCTestCase {
 }
 
 /// Records uploads and answers them asynchronously, like URLSession does.
-private final class StubUploader: MobileUploading {
+/// Shared with the engine-level tests (ReplayCoreFrameHoldTests).
+final class StubUploader: MobileUploading {
     private let lock = NSLock()
     private var archives: [Data] = []
     private var batches = 0

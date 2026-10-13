@@ -49,7 +49,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/replayfy/ios-sdk.git", from: "0.0.5")
+    .package(url: "https://github.com/replayfy/ios-sdk.git", from: "0.0.6")
 ],
 targets: [
     .target(
@@ -66,7 +66,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'Replayfy', '~> 0.0.5'
+pod 'Replayfy', '~> 0.0.6'
 ```
 
 ## Quick start
@@ -158,9 +158,15 @@ Replay.cancelSession()
 // Whether a session is currently recording.
 if Replay.isRecording { /* … */ }
 
-// Pause / resume screen capture (other events keep flowing).
+// Pause / resume screen capture (other events keep flowing). The pause
+// holds across background/foreground until resumed.
 Replay.pauseRecording()
 Replay.resumeRecording()
+
+// Durable opt-out of screen capture, persisted across launches (other
+// events keep flowing). A separate hold: opting back in doesn't undo a
+// pauseRecording() still in effect.
+Replay.optOutOfSchematicRecordings(true)
 
 // Force a new logical session (e.g. after logout → login).
 Replay.startNewSession()
@@ -336,11 +342,8 @@ Replay.trackInput(label: "Email", value: text, masked: false)
 Replay.reportFrame(pngData, rects: rects, styles: styles)
 ```
 
-> **Not yet active.** A few methods are on the public surface but are
-> no-ops in this release, pending an engine follow-up:
-> `optOutOfSchematicRecordings(_:)` / `isOptedOutOfSchematicRecordings`
-> and `urlForCurrentSession()` / `urlForCurrentUser()`. Calling them is
-> safe but has no effect.
+Frames reported while the app is in the background, or while capture is
+paused, opted out or on an excluded screen, are dropped.
 
 ## Privacy & masking
 

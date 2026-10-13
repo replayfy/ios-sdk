@@ -5,6 +5,30 @@ All notable changes to the Replayfy iOS SDK are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-10-13
+
+### Fixed
+- Frames a hybrid host captures itself (Flutter) are no longer taken while
+  the app is in the background. The host's capture timer keeps firing while
+  the background task keeps the app running, so those frames recorded a
+  screen nobody could see and pushed the session's last upload, and its end,
+  later. They are accepted again when the app returns to the foreground.
+- `resumeRecording`, opting back into schematic recordings or leaving an
+  excluded screen while the app is in the background no longer restarts
+  native capture there; it restarts when the app returns. This also holds
+  for a call from another thread (the React Native bridge) made as the app
+  leaves: these changes now take effect on the main thread.
+- A session that goes live while the app is in the background (restarted
+  there, or opened by a background launch such as a silent push or
+  background fetch) no longer takes frames or runs native capture until the
+  app is opened.
+- Opting back into schematic recordings
+  (`optOutOfSchematicRecordings(false)`) no longer lifts a `pauseRecording`
+  still in effect. The opt-out is now a hold of its own, and a call that
+  changes nothing (a consent sync on every launch) no longer sends a partial
+  frames archive.
+- The podspec declares MIT, matching LICENSE (it declared BSD-3-Clause).
+
 ## [0.0.5] - 2026-10-13
 
 ### Fixed
@@ -55,5 +79,6 @@ Initial public release.
   and `.replayTagScreenName(_:)` view modifiers.
 - Distribution via Swift Package Manager and CocoaPods.
 
+[0.0.6]: https://github.com/replayfy/ios-sdk/releases/tag/0.0.6
 [0.0.5]: https://github.com/replayfy/ios-sdk/releases/tag/0.0.5
 [0.0.1]: https://github.com/replayfy/ios-sdk/releases/tag/0.0.1
