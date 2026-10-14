@@ -73,7 +73,7 @@ let package = Package(
         // simulator host.
         .testTarget(
             name: "ReplayTests",
-            dependencies: ["Replay"],
+            dependencies: ["Replay", "ReplaySwiftUI"],
             path: "Tests/ReplayTests"
         ),
     ]

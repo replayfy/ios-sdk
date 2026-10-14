@@ -808,10 +808,10 @@ final class LegacyCore {
             perfMetrics?.stop()
         }
 
-        // Privacy: maskAllInputs → occludeAllTextFields. The
-        // dashboard's workspace-level default ALWAYS wins over the
-        // customer's per-call occludeAllTextFields(false).
-        PrivacyRegistry.shared.occludeAllTextFields = cfg.privacyMaskAllInputs
+        // Privacy: maskAllInputs → the dashboard's own text-field flag,
+        // ORed with the customer's occludeAllTextFields: it can add masking
+        // but never clear the app's choice.
+        PrivacyRegistry.shared.remoteOccludeAllTextFields = cfg.privacyMaskAllInputs
     }
 
     /// Decide whether to sample IN the current session. Called once

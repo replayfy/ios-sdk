@@ -102,6 +102,15 @@ public struct ReplayConfig {
     /// flowing). Mutable at runtime via `Replay.excludeScreen`/`setExcludedScreens`.
     public let excludedScreens: [String]
 
+    /// Stop masking password inputs inside `WKWebView`s. Off by default: like
+    /// the reference tracker, the SDK masks every `input[type=password]` (and
+    /// inputs marked as a password, one-time code or card number) in the web
+    /// views on screen, looked up with a short script before each frame; a
+    /// web view that doesn't answer in time is masked whole. Set true only if
+    /// the script must not run in your pages; the web views are then recorded
+    /// as drawn.
+    public let disableWebViewMasking: Bool
+
     public init(
         apiKey: String,
         apiHost: String,
@@ -120,7 +129,8 @@ public struct ReplayConfig {
         autoScreenName: Bool = true,
         useRemoteConfig: Bool = true,
         captureTouch: Bool = true,
-        excludedScreens: [String] = []
+        excludedScreens: [String] = [],
+        disableWebViewMasking: Bool = false
     ) {
         self.apiKey = apiKey
         self.apiHost = apiHost
@@ -140,5 +150,6 @@ public struct ReplayConfig {
         self.useRemoteConfig = useRemoteConfig
         self.captureTouch = captureTouch
         self.excludedScreens = excludedScreens
+        self.disableWebViewMasking = disableWebViewMasking
     }
 }

@@ -19,9 +19,17 @@
 #
 # Requires: a host API (ingest-api) at 127.0.0.1:4000 (the simulator shares
 # the host network), Docker Postgres for the session lookup, Xcode.
-# If REPLAY_API_DIR is set (default ~/Documents/New project) the script
-# (re)starts the API with short pack windows so Pass B is fast, and restores
-# the defaults on exit.
+# If REPLAY_API_DIR (default ~/Documents/injest-api) holds a built API
+# (apps/ingest-api/dist, built from the branch under test) the script
+# (re)starts it with short pack windows so Pass B is fast, and restores the
+# defaults on exit.
+#
+# WARNING: restarting the API stops whatever listens on :4000 — including a
+# running `yarn dev:api`. The API is started with the shell's `node`, so run
+# this after `nvm use 20.17.0`.
+#
+# PG_CONTAINER defaults to the one running Postgres container (`docker ps`);
+# set it when several are running.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
@@ -35,8 +43,8 @@ PROJ="Examples/ExampleApp/ReplayExample.xcodeproj"
 SIM_NAME="${REPLAY_SIM:-iPhone 17}"
 WID="${REPLAY_WID:-1}"
 JWT_SECRET="${JWT_SECRET:-dev-only-jwt-secret-change-me}"
-PG_CONTAINER="${PG_CONTAINER:-newproject-postgres-1}"
-REPLAY_API_DIR="${REPLAY_API_DIR:-$HOME/Documents/New project}"
+PG_CONTAINER="${PG_CONTAINER:-}"
+REPLAY_API_DIR="${REPLAY_API_DIR:-$HOME/Documents/injest-api}"
 TEST_IDLE_MS="${TEST_IDLE_MS:-8000}"
 TEST_SWEEP_MS="${TEST_SWEEP_MS:-8000}"
 DD="$ROOT/.e2e-derived"
@@ -46,6 +54,16 @@ red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 step()  { printf '\n\033[1m▶ %s\033[0m\n' "$*"; }
 fail()  { red "✗ $*"; exit 1; }
+
+# The running stack's Postgres, never a guessed name: a stale default
+# queried another compose project's database.
+if [ -z "$PG_CONTAINER" ]; then
+  PGS="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -i postgres)"
+  [ -n "$PGS" ] || fail "no running Postgres container: start the stack (docker compose up) or set PG_CONTAINER"
+  [ "$(printf '%s\n' "$PGS" | wc -l | tr -d ' ')" = 1 ] \
+    || fail "several Postgres containers are running, set PG_CONTAINER to one of: $(echo $PGS)"
+  PG_CONTAINER="$PGS"
+fi
 
 restart_api() { # $1=idleMs $2=sweepMs ; only when REPLAY_API_DIR is a built api
   [ -d "$REPLAY_API_DIR/apps/ingest-api/dist" ] || { echo "  (REPLAY_API_DIR not a built api — leaving API as-is)"; return 0; }

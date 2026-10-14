@@ -277,6 +277,12 @@ final class StubUploader: MobileUploading {
         return archives.flatMap { Self.frameTimestamps($0) }
     }
 
+    /// The JPEG of every uploaded frame, in upload order.
+    var imageJPEGs: [Data] {
+        lock.lock(); defer { lock.unlock() }
+        return archives.flatMap { Self.frames($0).map { $0.jpeg } }
+    }
+
     var messageBatchCount: Int {
         lock.lock(); defer { lock.unlock() }
         return batches
@@ -306,6 +312,11 @@ final class StubUploader: MobileUploading {
 
     /// Timestamps of the frames in one gzipped `[u64 ts][u32 size][jpeg]` archive.
     private static func frameTimestamps(_ gz: Data) -> [UInt64] {
+        return frames(gz).map { $0.ts }
+    }
+
+    /// The frames in one gzipped `[u64 ts][u32 size][jpeg]` archive.
+    private static func frames(_ gz: Data) -> [(ts: UInt64, jpeg: Data)] {
         // MobileGzip wraps raw DEFLATE in a 10-byte header + 8-byte trailer;
         // the last 4 bytes hold the uncompressed size.
         guard gz.count > 18 else { return [] }
@@ -316,12 +327,13 @@ final class StubUploader: MobileUploading {
             compression_decode_buffer(&raw, size, src.bindMemory(to: UInt8.self).baseAddress!, deflate.count, nil, COMPRESSION_ZLIB)
         }
         guard written == size else { return [] }
-        var out: [UInt64] = []
+        var out: [(ts: UInt64, jpeg: Data)] = []
         var off = 0
         while off + 12 <= raw.count {
             let ts = raw[off..<off + 8].enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << (8 * UInt64($1.offset)) }
             let len = raw[off + 8..<off + 12].enumerated().reduce(0) { $0 | Int($1.element) << (8 * $1.offset) }
-            out.append(ts)
+            let end = min(off + 12 + len, raw.count)
+            out.append((ts, Data(raw[off + 12..<end])))
             off += 12 + len
         }
         return out

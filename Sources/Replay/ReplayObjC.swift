@@ -61,6 +61,7 @@ public final class ReplayConfigBridge: NSObject {
     public var captureSnapshotPixels: Bool = true
     public var snapshotInterval: TimeInterval = 0.5
     public var autoScreenName: Bool = true
+    public var disableWebViewMasking: Bool = false
 
     /// Minimal ObjC-callable init. ObjC consumers tweak optional
     /// properties after construction:
@@ -91,7 +92,8 @@ public final class ReplayConfigBridge: NSObject {
             maxBodyBytes: maxBodyBytes,
             captureSnapshotPixels: captureSnapshotPixels,
             snapshotInterval: snapshotInterval,
-            autoScreenName: autoScreenName
+            autoScreenName: autoScreenName,
+            disableWebViewMasking: disableWebViewMasking
         )
     }
 }
@@ -156,6 +158,12 @@ public final class ReplayBridge: NSObject {
         Replay.addPrivacyView(view)
     }
 
+    /// `[Replay addPrivacyView: theView blockGestures: YES]`
+    @objc(addPrivacyView:blockGestures:)
+    public static func addPrivacyView(_ view: UIView, blockGestures: Bool) {
+        Replay.addPrivacyView(view, blockGestures: blockGestures)
+    }
+
     /// `[Replay removePrivacyView: theView]`
     @objc(removePrivacyView:)
     public static func removePrivacyView(_ view: UIView) {
@@ -180,10 +188,17 @@ public final class ReplayBridge: NSObject {
         Replay.occludeAllTextView(occlude)
     }
 
-    /// `[Replay occludeSensitiveScreen: YES]`
+    /// `[Replay occludeSensitiveScreen: YES]` — gestures are hidden with the
+    /// screen.
     @objc(occludeSensitiveScreen:)
     public static func occludeSensitiveScreen(_ occlude: Bool) {
         Replay.occludeSensitiveScreen(occlude)
+    }
+
+    /// `[Replay occludeSensitiveScreen: YES hideGestures: NO]`
+    @objc(occludeSensitiveScreen:hideGestures:)
+    public static func occludeSensitiveScreen(_ occlude: Bool, hideGestures: Bool) {
+        Replay.occludeSensitiveScreen(occlude, hideGestures: hideGestures)
     }
 
     /// `[Replay applyOcclusionForClass: [MyCustomView class]]`
@@ -216,24 +231,26 @@ public final class ReplayBridge: NSObject {
     }
 
     /// `[Replay occludeRectsOnNextFrame: rects styles: styles]` — per-rect
-    /// render styles (0 blur, 1 overlay), parallel to `rects`. RN / Flutter
-    /// pass boxed NSValue rects + NSNumber styles so each masked widget keeps
-    /// its own style in a single one-shot set.
+    /// render styles (0 blur, 1 overlay, 2 pixelate), parallel to `rects`.
+    /// RN / Flutter pass boxed NSValue rects + NSNumber styles so each masked
+    /// widget keeps its own style in a single one-shot set. A missing or
+    /// unknown style falls back to the global mask style.
     @objc(occludeRectsOnNextFrame:styles:)
     public static func occludeRectsOnNextFrame(_ rects: [NSValue],
                                                styles: [NSNumber]) {
+        let global = PrivacyRegistry.shared.maskStyle
         let maskRects = rects.enumerated().map { i, boxed -> MaskRect in
-            let raw = i < styles.count ? styles[i].intValue : 0
-            return MaskRect(rect: boxed.cgRectValue,
-                            style: ReplayMaskStyle(rawValue: raw) ?? .blur)
+            let style = i < styles.count ? (ReplayMaskStyle(rawValue: styles[i].intValue) ?? global) : global
+            return MaskRect(rect: boxed.cgRectValue, style: style)
         }
         PrivacyRegistry.shared.setPendingFrameRects(maskRects)
     }
 
-    /// `[Replay setMaskStyle: 0]` — 0 blur, 1 overlay.
+    /// `[Replay setMaskStyle: 1]` — 0 blur, 1 overlay (the default),
+    /// 2 pixelate. An unknown value selects overlay.
     @objc(setMaskStyle:)
     public static func setMaskStyle(_ style: Int) {
-        Replay.setMaskStyle(ReplayMaskStyle(rawValue: style) ?? .blur)
+        Replay.setMaskStyle(ReplayMaskStyle(rawValue: style) ?? .overlay)
     }
     #endif
 

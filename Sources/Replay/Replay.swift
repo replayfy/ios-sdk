@@ -167,9 +167,14 @@ public enum Replay {
     /// their own text widgets (React Native / Flutter), where there's no
     /// native `UITextField` to ``addObservedInput(_:)``. Pass `masked: true`
     /// for sensitive fields — the value is dropped (recorded as `"***"`) and
-    /// never leaves the device.
+    /// never leaves the device. While every text field is masked (the app's
+    /// ``occludeAllTextFields(_:)`` or the dashboard's "always mask input
+    /// values") or the whole screen is occluded, every value is recorded as
+    /// `"***"`, so the events can't carry what the frames hide.
     public static func trackInput(label: String, value: String, masked: Bool) {
         #if canImport(UIKit)
+        let privacy = PrivacyRegistry.shared
+        let masked = masked || privacy.occludesAllTextFields || privacy.occludeAllScreen
         ReplayCore.shared.sendInput(value: masked ? "***" : value, masked: masked, label: label)
         #endif
     }
@@ -241,8 +246,8 @@ public enum Replay {
 
     #if canImport(UIKit)
     /// Mark a view as privacy-sensitive — its contents won't appear
-    /// in playback, taps on it are blanked, and the view tree
-    /// snapshot reports it as `occluded`.
+    /// in playback, taps on it are recorded with a blanked label (`"***"`),
+    /// and the view tree snapshot reports it as `occluded`.
     ///
     /// Marks propagate down the view hierarchy: marking a
     /// `UIStackView` automatically protects every subview without
@@ -253,6 +258,13 @@ public enum Replay {
         PrivacyRegistry.shared.add(view)
     }
 
+    /// As ``addPrivacyView(_:)``, and with `blockGestures: true` gestures
+    /// that START in the view are not recorded at all. The app still
+    /// receives them. Default false, as in the reference tracker.
+    public static func addPrivacyView(_ view: UIView, blockGestures: Bool) {
+        PrivacyRegistry.shared.add(view, blockGestures: blockGestures)
+    }
+
     /// Remove a previously-added privacy mark. Safe to call even
     /// for views that were never marked.
     public static func removePrivacyView(_ view: UIView) {
@@ -260,10 +272,13 @@ public enum Replay {
     }
 
     /// Observe a text field so its value is recorded on the session
-    /// timeline when editing ends (not on every keystroke). Secure
-    /// fields (`isSecureTextEntry`) report a masked placeholder, never
-    /// the typed text, and the field's `placeholder` is used as the
-    /// label. Inputs are opt-in per field — never captured globally.
+    /// timeline when editing ends (not on every keystroke). A field the
+    /// frames mask reports a masked placeholder (`"***"`), never the typed
+    /// text: secure entry, a password / new-password / one-time-code /
+    /// card-number content type, every field while ``occludeAllTextFields(_:)``
+    /// or the dashboard's "always mask input values" is on, and fields
+    /// masked by registration or class. The field's `placeholder` is used
+    /// as the label. Inputs are opt-in per field — never captured globally.
     public static func addObservedInput(_ field: UITextField) {
         ReplayCore.shared.observeInput(field)
     }
@@ -272,6 +287,10 @@ public enum Replay {
     /// regardless of whether it's been explicitly registered via
     /// ``addPrivacyView(_:)``. Useful default-on PII protection when
     /// the app routinely handles sensitive input.
+    ///
+    /// The dashboard's "always mask input values" switch does the same from
+    /// the next session start; passing false here never lifts it. Secure,
+    /// password, one-time-code and card-number fields are masked either way.
     ///
     /// Mirrors the reference mobile SDK's `occludeAllTextFields(_:)`.
     public static func occludeAllTextFields(_ occlude: Bool) {
@@ -288,7 +307,7 @@ public enum Replay {
     }
 
     /// Register a `UIView` subclass for occlusion — every instance
-    /// (including subclasses) on screen gets the stripe overlay.
+    /// (including subclasses) on screen is masked.
     /// Goes beyond the bulk `UITextField` / `UILabel` flags: use
     /// when the app has custom widgets (e.g. CreditCardInputView,
     /// MedicalRecordCard) that should be default-occluded across
@@ -308,15 +327,25 @@ public enum Replay {
         PrivacyRegistry.shared.removeOcclusion(viewClass)
     }
 
-    /// Paint the ENTIRE captured snapshot with the diagonal-stripe
-    /// occlusion overlay. Nuclear option for screens where the
-    /// customer doesn't want ANY pixel data to leave the device
-    /// (health records, banking pin pad, etc.). Set false to
-    /// restore normal capture.
+    /// Paint the ENTIRE captured frame with one solid box, whatever the
+    /// mask style — frames a hybrid host captures itself (Flutter) included.
+    /// Nuclear option for screens where the customer doesn't want ANY pixel
+    /// data to leave the device (health records, banking pin pad, etc.).
+    /// Gestures are not recorded meanwhile either, as in the reference
+    /// tracker; see ``occludeSensitiveScreen(_:hideGestures:)`` to keep them.
+    /// Set false to restore normal capture.
     ///
     /// Mirrors the reference mobile SDK's `occludeSensitiveScreen(_:)`.
     public static func occludeSensitiveScreen(_ occlude: Bool) {
+        occludeSensitiveScreen(occlude, hideGestures: occlude)
+    }
+
+    /// As ``occludeSensitiveScreen(_:)``, choosing whether gestures are
+    /// recorded while the screen is occluded (`hideGestures: false` keeps
+    /// them, with blanked labels).
+    public static func occludeSensitiveScreen(_ occlude: Bool, hideGestures: Bool) {
         PrivacyRegistry.shared.occludeAllScreen = occlude
+        PrivacyRegistry.shared.hideScreenGestures = occlude && hideGestures
     }
 
     /// Mask a set of `CGRect` regions on the NEXT snapshot only. Entry point
@@ -344,11 +373,14 @@ public enum Replay {
             rects.map { MaskRect(rect: $0, style: style) })
     }
 
-    /// The default render style for masked regions — `.blur` Gaussian-blurs
-    /// the pixels, `.overlay` paints a solid box. Applies to `addPrivacyView`,
-    /// `occludeAllTextFields`, secure fields, the whole-screen overlay, and any
-    /// `occludeRectsOnNextFrame` call that doesn't pass its own style. Default
-    /// `.blur`.
+    /// The render style for the regions the app masks — `.overlay` paints a
+    /// solid box, `.blur` Gaussian-blurs the pixels, `.pixelate` reduces them
+    /// to coarse blocks. Applies to `addPrivacyView`, `occludeAllTextFields`,
+    /// `occludeAllTextView`, `applyOcclusion`, and any
+    /// `occludeRectsOnNextFrame` call that doesn't pass its own style.
+    /// Default `.overlay`, as in both reference trackers. What the SDK masks
+    /// on its own (secure and password-type fields, password inputs inside
+    /// web views) and ``occludeSensitiveScreen(_:)`` are always solid.
     public static func setMaskStyle(_ style: ReplayMaskStyle) {
         PrivacyRegistry.shared.maskStyle = style
     }

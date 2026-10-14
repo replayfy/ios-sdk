@@ -3,23 +3,23 @@ import CoreGraphics
 
 /// How a masked (privacy-sensitive) region is rendered in the recording.
 ///
-/// Mirrors the reference mobile SDK's occlusion types. The previous single
-/// hard-coded style (blur + diagonal stripes) is replaced by a choice:
+/// Mirrors the reference mobile SDK's occlusion types:
 ///
+///  - ``overlay``  — the region is painted with a solid color box: no pixel
+///                   of the source survives. The default, as in both
+///                   reference trackers.
 ///  - ``blur``     — the underlying pixels are Gaussian-blurred. Hints at the
-///                   shape/length of the content without revealing it. Good
-///                   default for a single field.
-///  - ``overlay``  — the region is painted with a solid color box. Cleaner on
-///                   a screen full of fields (no busy stripe texture), and the
-///                   strongest guarantee — no pixel of the source survives.
+///                   shape/length of the content without revealing it.
 ///  - ``pixelate`` — the region is reduced to coarse mosaic blocks. Reads as
 ///                   "redacted" while preserving rough layout/colour, between
 ///                   blur and overlay in how much it reveals.
 ///
-/// Set globally with ``Replay/setMaskStyle(_:)`` (the default applied to
-/// `addPrivacyView`, `occludeAllTextFields`, secure fields, …), or per region
-/// where the host supplies it (React Native / Flutter mask widgets,
-/// ``Replay/occludeRectsOnNextFrame(_:style:)``).
+/// Set globally with ``Replay/setMaskStyle(_:)`` (applied to `addPrivacyView`,
+/// `occludeAllTextFields`, `occludeAllTextView`, `applyOcclusion`, …), or per
+/// region where the host supplies it (React Native / Flutter mask widgets,
+/// ``Replay/occludeRectsOnNextFrame(_:style:)``). What the SDK masks on its
+/// own (secure and password-type fields, password inputs inside web views)
+/// and the whole-screen cover are always ``overlay``.
 @objc public enum ReplayMaskStyle: Int {
     case blur = 0
     case overlay = 1
