@@ -21,7 +21,7 @@
 Pod::Spec.new do |spec|
   spec.name         = "Replayfy"
   spec.module_name  = "Replay"
-  spec.version      = "0.0.5"
+  spec.version      = "0.0.6"
   spec.summary      = "Session replay, product analytics & error monitoring for iOS."
   spec.description  = <<-DESC
     Replayfy is the iOS SDK for session replay, product analytics, and
@@ -38,7 +38,7 @@ Pod::Spec.new do |spec|
   DESC
 
   spec.homepage     = "https://replayfy.app"
-  spec.license      = { :type => "BSD-3-Clause", :file => "LICENSE" }
+  spec.license      = { :type => "MIT", :file => "LICENSE" }
   spec.author       = { "Replayfy" => "hello@replayfy.app" }
   spec.source       = {
     :git => "https://github.com/replayfy/ios-sdk.git",

@@ -360,9 +360,12 @@ public enum Replay {
     #endif
 
     /// Pause schematic capture — snapshots stop, taps + network +
-    /// console + perf events keep flowing. In-memory only; a
-    /// process restart resets to running. Use
-    /// ``optOutOfSchematicRecordings(_:)`` for a durable opt-out.
+    /// console + perf events keep flowing. Holds across
+    /// background/foreground and session rotation until
+    /// ``resumeRecording()``; opting back into schematic recordings
+    /// doesn't lift it. In-memory only; a process restart resets to
+    /// running. Use ``optOutOfSchematicRecordings(_:)`` for a durable
+    /// opt-out.
     ///
     /// Mirrors the reference mobile SDK's `pauseScreenRecording()`.
     public static func pauseRecording() {
@@ -424,17 +427,18 @@ public enum Replay {
     /// Mirrors the reference mobile SDK's `optOutOfSchematicRecordings()` /
     /// `optIntoSchematicRecordings()`.
     public static func optOutOfSchematicRecordings(_ optOut: Bool) {
-        // Persist the intent (read back by isOptedOutOfSchematicRecordings).
-        LegacyCore.shared.setSchematicOptOut(optOut)
         #if canImport(UIKit)
         // Apply to the LIVE engine: schematic capture IS the screenshot stream,
-        // so opting out pauses it while every other event type keeps flowing.
-        if optOut {
-            ReplayCore.shared.pauseCapture()
-        } else {
-            ReplayCore.shared.resumeCapture()
-        }
+        // so opting out holds it (host-fed Flutter frames included) while every
+        // other event type keeps flowing. A hold of its own: opting back in
+        // doesn't lift a pauseRecording() still in effect. First, because the
+        // engine persists the flag itself and acts only when it changes,
+        // which it can't see once the flag is already written.
+        ReplayCore.shared.setSchematicOptOut(optOut)
         #endif
+        // Persist the intent (read back by isOptedOutOfSchematicRecordings)
+        // and apply it to the legacy snapshot pipeline.
+        LegacyCore.shared.setSchematicOptOut(optOut)
     }
 
     /// Whether schematic (snapshot) recording is currently opted out.
