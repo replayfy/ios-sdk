@@ -34,7 +34,7 @@ targets:
       - path: Sources
     dependencies:
       - package: Replay
-        product: Replay
+        product: Replayfy
     info:
       path: Info.plist
       properties:

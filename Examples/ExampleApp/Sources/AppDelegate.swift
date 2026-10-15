@@ -28,10 +28,13 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // directly on iOS Simulator (unlike Android emulator's
         // 10.0.2.2 NAT alias) because the simulator shares the host's
         // network namespace. Port 4000 is the local ingest-api.
+        // E2E runs point the app at another key / host through the launch
+        // environment (`SIMCTL_CHILD_REPLAY_API_KEY`, `SIMCTL_CHILD_REPLAY_API_HOST`).
+        let launchEnv = ProcessInfo.processInfo.environment
         Replay.start(
             with: ReplayConfig(
-                apiKey: "rpl_pk_ef7e2fc8c7f952bcd0a69466e1a42a0625f9",
-                apiHost: "http://127.0.0.1:4000",
+                apiKey: launchEnv["REPLAY_API_KEY"] ?? "rpl_pk_ef7e2fc8c7f952bcd0a69466e1a42a0625f9",
+                apiHost: launchEnv["REPLAY_API_HOST"] ?? "http://127.0.0.1:4000",
                 captureSnapshotPixels: true,
                 // Demo: exclude the Menu screen from replay — frames pause while
                 // it's foreground and resume on "Game". (Screen-exclusion feature.)
@@ -96,7 +99,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         let window = UIWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = UINavigationController(rootViewController: MainViewController())
+        // `-replayPrivacyDemo 1` opens the masking fixture instead of the game.
+        let privacyDemo = UserDefaults.standard.bool(forKey: "replayPrivacyDemo")
+        let root: UIViewController = privacyDemo ? PrivacyDemoViewController() : MainViewController()
+        window.rootViewController = UINavigationController(rootViewController: root)
+        // The fixture's colours are checked pixel by pixel: keep it light.
+        if privacyDemo { window.overrideUserInterfaceStyle = .light }
         window.makeKeyAndVisible()
         self.window = window
         return true
