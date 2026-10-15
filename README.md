@@ -20,8 +20,9 @@ can see, measure, and debug real user sessions.
   and battery.
 - **Network & console capture** — inspect requests and logs alongside the
   replay (network is opt-in).
-- **Privacy first** — mask or blur any view, field, label, or region;
-  secure text fields are masked automatically.
+- **Privacy first** — mask any view, field, label, or region; secure,
+  password, one-time-code and card-number fields, and password inputs in
+  web views, are masked automatically.
 - **SwiftUI & UIKit** — works with both, with dedicated SwiftUI view
   modifiers.
 - **Lightweight** — one call to start; sensible defaults; iOS 15+.
@@ -49,7 +50,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/replayfy/ios-sdk.git", from: "0.0.6")
+    .package(url: "https://github.com/replayfy/ios-sdk.git", from: "0.0.7")
 ],
 targets: [
     .target(
@@ -66,7 +67,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'Replayfy', '~> 0.0.6'
+pod 'Replayfy', '~> 0.0.7'
 ```
 
 ## Quick start
@@ -134,6 +135,7 @@ default. Pass any subset to `ReplayConfig(...)`.
 | `useRemoteConfig` | `Bool` | `true` | Let dashboard settings override these values at runtime. |
 | `captureTouch` | `Bool` | `true` | Capture taps natively (disable only for host-driven capture such as Flutter). |
 | `excludedScreens` | `[String]` | `[]` | Screen names whose frame capture pauses while they're foreground (case-insensitive); mutable at runtime via `Replay.excludeScreen`. |
+| `disableWebViewMasking` | `Bool` | `false` | Stop masking password inputs inside `WKWebView`s (see [Web views](#web-views)). |
 
 ## API
 
@@ -292,10 +294,13 @@ Replay.setPushNotificationToken(deviceToken, platform: "apns")
 
 ```swift
 // Record a text field's value when editing ends (opt-in per field).
-// Secure fields (isSecureTextEntry) are always recorded as "***".
+// A field the frames mask (secure entry, a password / one-time-code /
+// card-number content type, every field while all text fields are masked,
+// a registered field) is always recorded as "***".
 Replay.addObservedInput(emailField)
 
 // Report a value that isn't backed by a UITextField. masked → "***".
+// Also "***" while all text fields are masked or the screen is occluded.
 Replay.trackInput(label: "Coupon", value: code, masked: false)
 ```
 
@@ -347,37 +352,65 @@ paused, opted out or on an excluded screen, are dropped.
 
 ## Privacy & masking
 
-Sensitive content never has to leave the device. Secure/password fields
-are masked automatically; everything else is opt-in.
+Sensitive content never has to leave the device. Masked automatically, with
+no setup:
+
+- text fields and text views with secure entry, or with the content type
+  `.password`, `.newPassword`, `.oneTimeCode` or `.creditCardNumber`
+  (React Native text inputs included);
+- password inputs inside `WKWebView`s (see [Web views](#web-views)).
+
+Everything else is opt-in. Only views drawn on screen are masked: a hidden
+or fully transparent view (or one under a hidden or transparent ancestor) is
+skipped, and a view still fading out stays masked. Masks follow views while
+they animate. Taps on masked views are recorded with the label `"***"`.
+
+The dashboard's "always mask input values" setting masks every text field
+and text view from the next session start, on top of the app's own
+settings; `occludeAllTextFields(false)` does not lift it. Flutter draws its
+own text fields instead of using native ones, so neither this setting nor
+`occludeAllTextFields` covers them: wrap them in the Flutter SDK's
+`ReplayMask`. React Native text inputs are native fields and are covered.
 
 ### Choose a mask style
 
 ```swift
-Replay.setMaskStyle(.blur)      // Gaussian blur (default)
-Replay.setMaskStyle(.overlay)   // solid box — nothing survives
+Replay.setMaskStyle(.overlay)   // solid box — nothing survives (default)
+Replay.setMaskStyle(.blur)      // Gaussian blur
 Replay.setMaskStyle(.pixelate)  // coarse mosaic
 Replay.setBlurRadius(8)         // blur strength for .blur regions
 ```
 
-`ReplayMaskStyle` values: `.blur`, `.overlay`, `.pixelate`.
+`ReplayMaskStyle` values: `.blur`, `.overlay`, `.pixelate`. The style applies
+to the regions the app masks itself. What the SDK masks on its own (secure
+and password-type fields, web view password inputs) and the whole-screen
+cover are always solid.
 
 ### UIKit masking
 
 ```swift
-// Mask a single view (marks propagate to subviews).
+// Mask a single view (marks propagate to subviews). Taps on it are kept
+// with a blanked label; blockGestures: true leaves gestures that start in
+// it out of the recording (the app still receives them).
 Replay.addPrivacyView(cardNumberField)
+Replay.addPrivacyView(cvcRow, blockGestures: true)
 Replay.removePrivacyView(cardNumberField)
 
-// Mask every text field / text view, or every label.
+// Mask every text field / text view, or every label (button titles and
+// other text drawn in a label included; taps then carry no text either).
 Replay.occludeAllTextFields(true)
 Replay.occludeAllTextView(true)
 
-// Mask every instance of a view class, everywhere it appears.
+// Mask every instance of a view class, everywhere it appears, with
+// everything inside it.
 Replay.applyOcclusion(CreditCardView.self)
 Replay.removeOcclusion(CreditCardView.self)
 
-// Mask the entire screen (banking PIN pad, health records, …).
+// Mask the entire screen with one solid box (banking PIN pad, health
+// records, …). Gestures are not recorded meanwhile; pass
+// hideGestures: false to keep them (with blanked labels).
 Replay.occludeSensitiveScreen(true)
+Replay.occludeSensitiveScreen(true, hideGestures: false)
 
 // Mask specific regions on the next frame only (root-relative points).
 Replay.occludeRectsOnNextFrame(rects)
@@ -400,8 +433,33 @@ var body: some View {
 }
 ```
 
-`replayOcclude(blockGestures:)` also suppresses taps on the masked region
-when `blockGestures` is `true` (the default).
+The content under `.replayOcclude()` keeps receiving every touch.
+`replayOcclude(blockGestures:)` leaves gestures that start in the masked
+region out of the recording when `blockGestures` is `true` (the default).
+
+### Web views
+
+Password inputs inside `WKWebView`s are masked solid: inputs of type
+`password`, inputs whose `autocomplete` names a password, one-time code or
+card number, and elements with the web SDK's `rr-block` / `rr-mask` classes,
+in the page, in its same-origin frames and in open shadow roots (web
+components). While every text field is masked, text-like inputs and
+textareas are masked too. Before each frame the SDK asks the web views on
+screen where these are, with a short read-only script run in an isolated
+world (nothing is installed in your pages), and places each mask where the
+page is scrolled and zoomed to when the frame is taken.
+
+A web view is masked whole for a frame when it has not answered in time (its
+first frame on screen, a slow page, a script error), while it is being
+zoomed, when it answered before catching up with a zoom, page zoom or
+resize, when one of the page's own scroll areas moved after it answered, or
+while a masked input is being moved by an animation (a sliding login
+sheet). A frame of another origin can't be looked into: it is masked whole
+when its attributes mark it as a payment or sign-in frame (`allow="payment"`,
+or a title, name or address naming a card, checkout, login and the like);
+other embeds such as videos and maps stay visible. Inputs inside closed
+shadow roots can't be found either: put the `rr-mask` class on the
+component. Turn this off with `ReplayConfig(..., disableWebViewMasking: true)`.
 
 ## Links
 

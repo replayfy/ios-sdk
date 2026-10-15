@@ -173,6 +173,7 @@ public final class ReplayCore {
         self.lastConfig = config
         self.autoScreenName = config.autoScreenName
         self.excludedScreens = Set(config.excludedScreens.map { $0.lowercased() })
+        PrivacyRegistry.shared.webViewMaskingEnabled = !config.disableWebViewMasking
         let transport = MobileTransport(baseURL: host, projectKey: projectKey)
         self.transport = transport
 
@@ -194,6 +195,12 @@ public final class ReplayCore {
                 // but local config still applies when the server is silent).
                 self.captureNetworkHeaders = resp.captureNetworkHeaders ?? config.captureHeaders
                 self.captureNetworkBodies = resp.captureNetworkBodies ?? config.captureBodies
+                // The dashboard's "always mask input values" switch, applied
+                // before the first frame. ORed with the app's own
+                // occludeAllTextFields, so it can only add masking; a server
+                // that doesn't send it clears it, and it applies whatever
+                // useRemoteConfig says.
+                PrivacyRegistry.shared.remoteOccludeAllTextFields = resp.privacy?.occludeAllTextFields ?? false
 
                 // Wire screenshot privacy masking to the PrivacyRegistry — the
                 // same source the legacy capture path consults. Without this
@@ -211,7 +218,10 @@ public final class ReplayCore {
                 let screenshots = MobileScreenshots(
                     transport: transport,
                     nativeCapture: config.captureSnapshotPixels,
-                    privacyRects: { self.privacyRectsProvider() }
+                    privacyRects: { self.privacyRectsProvider() },
+                    // Looks up the password inputs inside web views before
+                    // each native capture.
+                    prepareFrame: { PrivacyRegistry.shared.prepareFrame($0) }
                 )
                 screenshots.setSettings(fps: resp.fps, quality: resp.quality)
                 self.collector = collector
@@ -308,6 +318,12 @@ public final class ReplayCore {
         } else if preStart.count < 1000 {
             preStart.append(msg)
         }
+    }
+
+    /// Messages waiting for the session to go live. For tests.
+    var preStartMessages: [Data] {
+        preStartLock.lock(); defer { preStartLock.unlock() }
+        return preStart
     }
 
     /// Hand the live session its frame buffer, and start native capture
@@ -488,7 +504,14 @@ public final class ReplayCore {
     /// Dart-side gesture capture). `kind` is "tap" / "long_press" / "swipe";
     /// a long-press is recorded as a click (the dashboard keys gestures off the
     /// label + coordinates), and swipes carry their direction.
+    /// The single funnel for native and host-reported gestures, so hiding
+    /// gestures with an occluded screen (the reference tracker's default)
+    /// covers both; when an app keeps them, their labels are blanked, as the
+    /// frames are.
     public func reportInteraction(kind: String, label: String, x: UInt64, y: UInt64, direction: String) {
+        let privacy = PrivacyRegistry.shared
+        if privacy.occludeAllScreen && privacy.hideScreenGestures { return }
+        let label = privacy.occludeAllScreen ? "***" : label
         switch kind {
         case "swipe": sendSwipe(label: label, x: x, y: y, direction: direction)
         case "tap": sendClick(label: label, x: x, y: y)
@@ -520,7 +543,9 @@ public final class ReplayCore {
             let style = i < styles.count ? (ReplayMaskStyle(rawValue: styles[i]) ?? global) : global
             return MaskRect(rect: r, style: style)
         }
-        screenshots?.submitFrame(png, rects: maskRects)
+        // The host only reports its own mask widgets: the app's
+        // occludeSensitiveScreen covers the whole frame here too.
+        screenshots?.submitFrame(png, rects: maskRects, occludeAll: PrivacyRegistry.shared.occludeAllScreen)
     }
     func sendPerformance(name: String, value: UInt64) {
         enqueue(MobileWire.performance(name: name, value: value, timestamp: nowMs()))

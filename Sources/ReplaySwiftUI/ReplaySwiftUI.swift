@@ -28,9 +28,10 @@ import Replay
 public extension View {
 
     /**
-     * Mark this view's rendered region as privacy-sensitive — taps
-     * on it ship as `isSensitive: true` with metadata blanked, the
-     * region renders as a diagonal-stripe noise pattern in playback.
+     * Mark this view's rendered region as privacy-sensitive — the
+     * region is masked in playback (solid by default, or the style set
+     * with `Replay.setMaskStyle`), and taps on it are recorded with a
+     * blanked label.
      *
      * Use on any view containing PII (credit card forms, payment
      * methods, password fields, profile addresses, etc).
@@ -38,25 +39,25 @@ public extension View {
      * Implementation: inserts a transparent UIView marker at the
      * same screen rect via `.overlay(…)`. The marker registers with
      * the SDK's PrivacyRegistry; tap + snapshot pipelines check
-     * bounds-intersection against registered markers.
+     * bounds-intersection against registered markers. The marker never
+     * takes part in hit-testing, so the content under it keeps
+     * receiving every touch.
      *
-     * - Parameter blockGestures: When true (default), taps on the
-     *   marker's region are suppressed from the SDK's analytics
-     *   even before the privacy filter runs — useful when the
+     * - Parameter blockGestures: When true (default), gestures that
+     *   start in the region are not recorded at all — useful when the
      *   sensitive region also responds to gestures that you don't
      *   want correlated with the user (e.g. a "show CVC" eyeball
-     *   button). Defaults to true.
+     *   button). It only affects the recording; the app still
+     *   receives the gestures. Defaults to true.
      */
     func replayOcclude(blockGestures: Bool = true) -> some View {
-        // overlay places the marker IN FRONT so it covers the SwiftUI
-        // content's hit-test region. The marker's userInteractionEnabled
-        // is false (default for UIViewRepresentable view of this shape)
-        // OR set to true when blockGestures=true — see PrivacyMarkerView.
-        // Marker is fully transparent so the user sees the SwiftUI
-        // content as if no modifier were applied.
+        // overlay places the marker IN FRONT, over the SwiftUI content's
+        // region, so its frame matches what is drawn. It is fully
+        // transparent and never hit-testable, so the user sees and
+        // touches the content as if no modifier were applied.
         self.overlay(
             PrivacyMarker(blockGestures: blockGestures)
-                .allowsHitTesting(blockGestures)
+                .allowsHitTesting(false)
         )
     }
 
@@ -89,16 +90,16 @@ private struct PrivacyMarker: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PrivacyMarkerView {
         let view = PrivacyMarkerView()
-        view.isUserInteractionEnabled = blockGestures
         // Register synchronously so the next snapshot/tap captures
         // already see this marker. Registry holds weak ref so we
         // don't leak the view across SwiftUI re-renders.
-        Replay.addPrivacyView(view)
+        Replay.addPrivacyView(view, blockGestures: blockGestures)
         return view
     }
 
     func updateUIView(_ uiView: PrivacyMarkerView, context: Context) {
-        uiView.isUserInteractionEnabled = blockGestures
+        // blockGestures can change between renders.
+        Replay.addPrivacyView(uiView, blockGestures: blockGestures)
     }
 
     static func dismantleUIView(_ uiView: PrivacyMarkerView, coordinator: ()) {
@@ -107,19 +108,24 @@ private struct PrivacyMarker: UIViewRepresentable {
 }
 
 /// Concrete UIView subclass for the marker. Transparent; doesn't
-/// draw anything. Named subclass (rather than a bare UIView) makes
-/// it easy to spot in the view hierarchy debugger and lets us add
-/// debug overlays in the future without churning the public surface.
+/// draw anything, and never takes a touch. Named subclass (rather
+/// than a bare UIView) makes it easy to spot in the view hierarchy
+/// debugger and lets us add debug overlays in the future without
+/// churning the public surface.
 private final class PrivacyMarkerView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         isOpaque = false
+        isUserInteractionEnabled = false
         // We don't draw anything; clear out the default drawing path
         // so the renderer doesn't waste a fill on us.
         contentMode = .scaleToFill
     }
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Touches go to the content underneath, never to the marker.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
 }
 #endif // canImport(UIKit)

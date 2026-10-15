@@ -19,6 +19,15 @@ struct MobileStartResponse: Decodable {
     // false ⇒ the server's sampling gate dropped this launch; the SDK must
     // not record. Optional → default true for older servers.
     let record: Bool?
+    // Dashboard privacy enforcement. Optional: older servers don't send it.
+    let privacy: MobileStartPrivacy?
+}
+
+/// The `privacy` block of the session-start response.
+struct MobileStartPrivacy: Decodable {
+    /// The dashboard's "always mask input values": mask every text field and
+    /// text view, on top of whatever the app does. It can only add masking.
+    let occludeAllTextFields: Bool?
 }
 
 /// The upload half of `MobileTransport` that the frame and message buffers

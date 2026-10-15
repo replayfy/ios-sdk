@@ -5,11 +5,12 @@ import UIKit
 ///
 /// Mirrors the reference's `addObservedInput`: inputs are opt-in per field (no
 /// global auto-capture), the value is read on `.editingDidEnd` (not per
-/// keystroke), and a secure field (`isSecureTextEntry`) reports a masked
-/// placeholder — never the typed text — while the field's `placeholder` is used
-/// as the label.
+/// keystroke), and a field the frames mask (secure entry, a secure content
+/// type, every field while all text fields are masked, a registered or
+/// class-masked field) reports a masked placeholder — never the typed text —
+/// while the field's `placeholder` is used as the label.
 final class MobileInputCapture: NSObject {
-    /// `(value, masked, label)` — `value` is `"***"` for secure fields.
+    /// `(value, masked, label)` — `value` is `"***"` for masked fields.
     typealias Handler = (_ value: String, _ masked: Bool, _ label: String) -> Void
 
     var onInput: Handler?
@@ -24,8 +25,9 @@ final class MobileInputCapture: NSObject {
         observed.add(field)
     }
 
-    @objc private func editingEnded(_ sender: UITextField) {
-        let masked = sender.isSecureTextEntry
+    @objc func editingEnded(_ sender: UITextField) {
+        // Whatever the frames hide, the event must not carry either.
+        let masked = PrivacyRegistry.shared.isOccludedElement(sender)
         let value = masked ? "***" : (sender.text ?? "")
         onInput?(value, masked, sender.placeholder ?? "")
     }
