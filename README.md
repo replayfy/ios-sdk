@@ -193,6 +193,10 @@ Replay.stopApplicationAndUploadData(timeoutSeconds: 5)
 // Attach a known user to the session; anonymous history links back to them.
 Replay.identify("user_123", properties: ["email": "a@b.com", "plan": "pro"])
 
+// A `picture` (or `avatar`) trait set to a public https image URL — top-level
+// or nested in customProps — becomes the user's avatar in the dashboard.
+Replay.identify("user_123", properties: ["picture": "https://cdn.example.com/u/123.png"])
+
 // Fire a custom event onto the timeline (drives funnels and filters).
 Replay.track("checkout_started", properties: ["cart_value": 4200])
 
