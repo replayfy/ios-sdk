@@ -367,7 +367,10 @@ they animate. Taps on masked views are recorded with the label `"***"`.
 
 The dashboard's "always mask input values" setting masks every text field
 and text view from the next session start, on top of the app's own
-settings; `occludeAllTextFields(false)` does not lift it.
+settings; `occludeAllTextFields(false)` does not lift it. Flutter draws its
+own text fields instead of using native ones, so neither this setting nor
+`occludeAllTextFields` covers them: wrap them in the Flutter SDK's
+`ReplayMask`. React Native text inputs are native fields and are covered.
 
 ### Choose a mask style
 
@@ -393,11 +396,13 @@ Replay.addPrivacyView(cardNumberField)
 Replay.addPrivacyView(cvcRow, blockGestures: true)
 Replay.removePrivacyView(cardNumberField)
 
-// Mask every text field / text view, or every label.
+// Mask every text field / text view, or every label (button titles and
+// other text drawn in a label included; taps then carry no text either).
 Replay.occludeAllTextFields(true)
 Replay.occludeAllTextView(true)
 
-// Mask every instance of a view class, everywhere it appears.
+// Mask every instance of a view class, everywhere it appears, with
+// everything inside it.
 Replay.applyOcclusion(CreditCardView.self)
 Replay.removeOcclusion(CreditCardView.self)
 
@@ -436,14 +441,24 @@ region out of the recording when `blockGestures` is `true` (the default).
 
 Password inputs inside `WKWebView`s are masked solid: inputs of type
 `password`, inputs whose `autocomplete` names a password, one-time code or
-card number, and elements with the web SDK's `rr-block` / `rr-mask` classes.
-While every text field is masked, text-like inputs and textareas are masked
-too. Before each frame the SDK asks the web views on screen where these are,
-with a short read-only script run in an isolated world (nothing is installed
-in your pages). A web view that has not answered in time (its first frame on
-screen, a slow page, a script error) is masked whole for that frame, and so
-is a frame of another origin inside the page. Turn this off with
-`ReplayConfig(..., disableWebViewMasking: true)`.
+card number, and elements with the web SDK's `rr-block` / `rr-mask` classes,
+in the page, in its same-origin frames and in open shadow roots (web
+components). While every text field is masked, text-like inputs and
+textareas are masked too. Before each frame the SDK asks the web views on
+screen where these are, with a short read-only script run in an isolated
+world (nothing is installed in your pages), and places each mask where the
+page is scrolled to when the frame is taken.
+
+A web view is masked whole for a frame when it has not answered in time (its
+first frame on screen, a slow page, a script error), while it is being
+zoomed, when one of the page's own scroll areas moved after it answered, or
+while a masked input is being moved by an animation (a sliding login
+sheet). A frame of another origin can't be looked into: it is masked whole
+when its attributes mark it as a payment or sign-in frame (`allow="payment"`,
+or a title, name or address naming a card, checkout, login and the like);
+other embeds such as videos and maps stay visible. Inputs inside closed
+shadow roots can't be found either: put the `rr-mask` class on the
+component. Turn this off with `ReplayConfig(..., disableWebViewMasking: true)`.
 
 ## Links
 

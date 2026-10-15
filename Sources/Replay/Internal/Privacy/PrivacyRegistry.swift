@@ -7,14 +7,17 @@ import WebKit
 #endif
 
 /// Tracks UIViews that the customer has marked as privacy-sensitive
-/// via ``Replay/addPrivacyView(_:)``. Consulted by:
+/// via ``Replay/addPrivacyView(_:)``, plus the bulk / per-class flags and
+/// the views the SDK masks on its own. Consulted by:
 ///
-///   - ``TapTracker`` — taps on/inside a marked view get
-///     `isSensitive: true` with uiValue/uiId/uiClass blanked.
-///   - ``ViewTreeSerializer`` — nodes inside a marked subtree get
-///     `occluded: true` with text + ariaLabel + imageRef blanked.
-///   - ``BitmapCapture`` — paints a noise pattern over marked view
-///     bounds so the captured PNG never carries the pixel content.
+///   - ``MobileScreenshots`` — masks every sensitive region of each frame
+///     (``windowPrivacyBounds(in:)``) so no pixel of it leaves the device.
+///   - ``MobileTouchCapture`` / ``MobileInputCapture`` — taps on, and
+///     observed inputs in, a masked view carry `"***"` instead of its
+///     content (``isOccludedElement(_:)``).
+///   - The legacy capture path (``TapTracker``, ``ViewTreeSerializer``,
+///     ``BitmapCapture``'s stripe overlay), which the frames pipeline does
+///     not use.
 ///
 /// Weak refs throughout — never retains the customer's views. Views
 /// removed from the hierarchy + deallocated drop out of the registry
@@ -152,6 +155,20 @@ final class PrivacyRegistry {
             }
             return false
         }
+    }
+
+    /// Whether [view] or any of its ancestors is an instance of a
+    /// registered class. The frames mask such an instance whole, so the
+    /// labels and inputs inside it are masked too.
+    func isInsideOccludedClass(_ view: UIView) -> Bool {
+        let classes = occludedClassesLock.withLock { occludedClasses }
+        if classes.isEmpty { return false }
+        var cur: UIView? = view
+        while let c = cur {
+            if classes.contains(where: { c.isKind(of: $0) }) { return true }
+            cur = c.superview
+        }
+        return false
     }
     #endif
 
@@ -328,9 +345,9 @@ final class PrivacyRegistry {
         if occludeAllTextViews, view is UILabel {
             return true
         }
-        // Per-class occlusion (applyOcclusion). Cheap when no
-        // classes registered (early-out on empty set).
-        if matchesOccludedClass(view) {
+        // Per-class occlusion (applyOcclusion). The frames mask an
+        // instance whole, so whatever sits inside one is sensitive too.
+        if isInsideOccludedClass(view) {
             return true
         }
         return lock.withLock {

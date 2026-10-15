@@ -21,9 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Taps on masked views are recorded with the label `"***"` instead of the
   view's text: secure and password-type fields, every text field while all
   text fields are masked, registered views and their content, views of an
-  `applyOcclusion` class, views under a `.replayOcclude()` region, and
-  anything while the whole screen is occluded. Taps on secure fields, which
-  used to be dropped, are now kept with the blanked label.
+  `applyOcclusion` class and their content, views under a `.replayOcclude()`
+  region, and anything while the whole screen is occluded. While every label
+  is masked (`occludeAllTextView`), labels taken from text on screen (button
+  titles, accessibility labels, placeholders) are blanked too. Taps on
+  secure fields, which used to be dropped, are now kept with the blanked
+  label.
 - Observed inputs (`addObservedInput`) report `"***"` whenever the frames
   mask the field, not only for secure entry. Values a host reports with
   `trackInput` are blanked while every text field is masked or the screen
@@ -40,13 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   too.
 - Password inputs inside `WKWebView`s are masked automatically (inputs of
   type password, and inputs marked as a password, one-time code or card
-  number). The SDK looks them up with a short read-only script before each
-  frame; a web view that has not answered in time, or a frame of another
-  origin inside it, is masked whole. Turn this off with
+  number), in same-origin frames and open shadow roots too. The SDK looks
+  them up with a short read-only script before each frame and places each
+  mask where the page is scrolled to when the frame is taken. A web view
+  that has not answered in time, is being zoomed, had one of its own scroll
+  areas moved, or has a masked input moving in an animation, is masked whole
+  for that frame; so is a frame of another origin that is marked as a
+  payment or sign-in frame. Turn this off with
   `ReplayConfig(disableWebViewMasking: true)`.
 - The dashboard's "always mask input values" setting masks every text field
   and text view from the next session start. It adds to the app's
   `occludeAllTextFields`; `occludeAllTextFields(false)` does not lift it.
+  Flutter text fields are not native views and are not covered: wrap them
+  in `ReplayMask`.
 - `addPrivacyView(_:blockGestures:)`, and
   `occludeSensitiveScreen(_:hideGestures:)`, also from Objective-C.
 

@@ -21,8 +21,10 @@ import ReplaySwiftUI
 ///   • tap labels and observed inputs are blanked wherever the frames are;
 ///   • `.replayOcclude()` never takes the app's touches;
 ///   • the dashboard's "always mask input values" adds to the app's flag;
-///   • password inputs inside web views are masked, and a web view that
-///     hasn't answered is masked whole.
+///   • password inputs inside web views (shadow roots and same-origin
+///     frames included) are masked where they are drawn, a web view that
+///     hasn't answered or can't be placed is masked whole, and only frames
+///     of another origin that may take credentials are masked whole.
 @MainActor
 final class MobilePrivacyReferenceParityTests: XCTestCase {
     private let registry = PrivacyRegistry.shared
@@ -437,6 +439,70 @@ final class MobilePrivacyReferenceParityTests: XCTestCase {
         XCTAssertEqual(MobileTouchCapture.describe(beside), "Hello")
     }
 
+    /// The frames mask an `applyOcclusion` instance whole, so taps on and
+    /// inputs in its content carry no content either.
+    func testTheContentOfAnOccludedClassIsBlankedInEvents() {
+        let (window, root) = makeWindow()
+        registry.applyOcclusion(CardStandInView.self)
+        defer { registry.removeOcclusion(CardStandInView.self) }
+        let card = CardStandInView(frame: CGRect(x: 0, y: 40, width: 320, height: 200))
+        root.addSubview(card)
+        let number = label(in: card, "4111 1111 1111 1111", y: 10)
+        let name = field(in: card, y: 80)
+        name.text = "Ada Obi"
+        let outside = label(in: root, "Hello", y: 300)
+        XCTAssertTrue(isCovered(number, by: registry.bulkBounds(within: window), in: window), "the frames hide it")
+
+        XCTAssertEqual(MobileTouchCapture.describe(number), "***")
+        XCTAssertEqual(MobileTouchCapture.describe(card), "***")
+        XCTAssertEqual(MobileTouchCapture.describe(outside), "Hello")
+        let capture = MobileInputCapture()
+        var reported: (value: String, masked: Bool)?
+        capture.onInput = { value, masked, _ in reported = (value, masked) }
+        capture.observe(name)
+        capture.editingEnded(name)
+        XCTAssertEqual(reported?.value, "***")
+        XCTAssertEqual(reported?.masked, true)
+    }
+
+    /// While every label is masked the frames cover the UILabel a button,
+    /// segment or placeholder draws its text in, so tap labels taken from
+    /// that text (or the accessibility label repeating it) are blanked.
+    func testWhileEveryLabelIsMaskedTextOnButtonsAndAccessibilityLabelsIsBlanked() throws {
+        let (window, root) = makeWindow()
+        let button = UIButton(type: .system)
+        button.frame = CGRect(x: 20, y: 40, width: 280, height: 44)
+        button.setTitle("Send $250 to Ada Obi", for: .normal)
+        root.addSubview(button)
+        let icon = UIView(frame: CGRect(x: 20, y: 100, width: 44, height: 44))
+        icon.accessibilityLabel = "Ada Obi"
+        root.addSubview(icon)
+        let email = field(in: root, y: 160)
+        email.placeholder = "ada@example.com"
+        let custom = HostLikeView(frame: CGRect(x: 20, y: 220, width: 44, height: 44))
+        root.addSubview(custom)
+        let tagged = UIButton(frame: CGRect(x: 20, y: 280, width: 100, height: 44))
+        tagged.setTitle("Pay Ada", for: .normal)
+        tagged.accessibilityIdentifier = "pay-button"
+        root.addSubview(tagged)
+        root.layoutIfNeeded()
+        button.layoutIfNeeded()
+
+        XCTAssertEqual(MobileTouchCapture.describe(button), "Send $250 to Ada Obi")
+        XCTAssertEqual(MobileTouchCapture.describe(icon), "Ada Obi")
+        XCTAssertEqual(MobileTouchCapture.describe(email), "ada@example.com")
+
+        Replay.occludeAllTextView(true)
+        let title = try XCTUnwrap(button.titleLabel)
+        XCTAssertTrue(isCovered(title, by: registry.windowPrivacyBounds(in: window).map { $0.rect }, in: window),
+                      "the frames hide the title")
+        XCTAssertEqual(MobileTouchCapture.describe(button), "***")
+        XCTAssertEqual(MobileTouchCapture.describe(icon), "***")
+        XCTAssertEqual(MobileTouchCapture.describe(email), "***")
+        XCTAssertEqual(MobileTouchCapture.describe(custom), "HostLikeView", "a class name is not text on screen")
+        XCTAssertEqual(MobileTouchCapture.describe(tagged), "pay-button", "a developer id is not text on screen")
+    }
+
     // MARK: - 9. SwiftUI .replayOcclude
 
     func testReplayOccludeLeavesTouchesToTheContentAndBlocksTheirRecording() throws {
@@ -554,6 +620,250 @@ final class MobilePrivacyReferenceParityTests: XCTestCase {
         registry.remoteOccludeAllTextFields = true
         rects = try nextFrame(in: window)
         XCTAssertTrue(rects.contains { $0.rect.contains(text) }, "every field is masked: \(rects.map { $0.rect })")
+    }
+
+    /// The page measures a few milliseconds before the capture: an input in
+    /// the page's flow is placed where the content is scrolled to when the
+    /// frame is taken (the keyboard scrolling a field into view), and one
+    /// pinned to the viewport stays where it is.
+    func testWebViewMasksFollowAScrollAfterThePageMeasured() throws {
+        let (_, root) = makeWindow()
+        let web = WKWebView(frame: CGRect(x: 0, y: 40, width: 320, height: 400))
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        root.addSubview(web)
+        try load(web, """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="margin:0;height:3000px">
+        <input type="password" value="SECRET" style="position:absolute;left:20px;top:600px;width:100px;height:20px;border:0">
+        <input type="password" value="PINNED" style="position:fixed;left:20px;top:10px;width:100px;height:20px;border:0">
+        </body></html>
+        """)
+        let (answer, asked) = try ask(web)
+        XCTAssertEqual(answer.rects.count, 2)
+        XCTAssertFalse(answer.moving)
+
+        web.scrollView.contentOffset = CGPoint(x: 0, y: 300)
+        let rects = try XCTUnwrap(WebViewMasking.place(answer, in: web, asked: asked))
+        XCTAssertTrue(rects.contains { $0.contains(CGRect(x: 20, y: 300, width: 100, height: 20)) },
+                      "in the page's flow: \(rects)")
+        XCTAssertTrue(rects.contains { $0.contains(CGRect(x: 20, y: 10, width: 100, height: 20)) },
+                      "pinned to the viewport: \(rects)")
+    }
+
+    /// Once the page has caught up with the scroll view, the masks sit
+    /// exactly where the content is drawn, scrolled, under an inset the app
+    /// set itself (which doesn't move the page's viewport) and under a safe
+    /// area (which does). Before that, an input pinned to the viewport is
+    /// covered at every inset it could be drawn below. (Web views don't paint
+    /// in the test host; the drawn pixels are checked in the simulator
+    /// end-to-end run.)
+    func testWebViewMasksAreTightOnceThePageHasCaughtUp() throws {
+        for safeArea in [false, true] {
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+            let vc = UIViewController()
+            window.rootViewController = vc
+            window.makeKeyAndVisible()
+            windows.append(window)
+            let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 400))
+            vc.view.addSubview(web)
+            if safeArea {
+                vc.additionalSafeAreaInsets = UIEdgeInsets(top: 50, left: 0, bottom: 0, right: 0)
+            } else {
+                web.scrollView.contentInsetAdjustmentBehavior = .never
+                web.scrollView.contentInset = UIEdgeInsets(top: 50, left: 0, bottom: 0, right: 0)
+            }
+            vc.view.layoutIfNeeded()
+            try load(web, """
+            <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+            <body style="margin:0;height:3000px">
+            <input type="password" value="SECRET" style="position:absolute;left:20px;top:600px;width:100px;height:20px;border:0">
+            <input type="password" value="PINNED" style="position:fixed;left:180px;top:10px;width:100px;height:20px;border:0">
+            </body></html>
+            """)
+            // The page's viewport starts below the safe area (the test
+            // window's status bar plus the 50 added here), not below an inset
+            // the app set itself.
+            let obscured: CGFloat = safeArea ? web.safeAreaInsets.top : 0
+            XCTAssertEqual(web.scrollView.adjustedContentInset.top, safeArea ? obscured : 50)
+            XCTAssertGreaterThanOrEqual(obscured, safeArea ? 50 : 0)
+            web.scrollView.contentOffset = CGPoint(x: 0, y: 250)
+            waitForPage(web, top: 250 + obscured)
+
+            let (answer, asked) = try ask(web, previousOffset: web.scrollView.contentOffset)
+            XCTAssertTrue(asked.settled)
+            let rects = try XCTUnwrap(WebViewMasking.place(answer, in: web, asked: asked))
+            let flow = CGRect(x: 20, y: 600 - 250, width: 100, height: 20)        // content y - offset
+            let pinned = CGRect(x: 180, y: obscured + 10, width: 100, height: 20)  // below the safe area
+            for input in [flow, pinned] {
+                let mask = rects.first { $0.contains(input) }
+                XCTAssertNotNil(mask, "safe area \(safeArea): \(input) uncovered by \(rects)")
+                XCTAssertLessThan(mask?.height ?? .infinity, input.height + 4, "no smear once caught up: \(rects)")
+            }
+
+            // Not caught up yet (no earlier lookup): the pinned input is
+            // covered below no inset through the largest one.
+            let (early, earlyAsked) = try ask(web)
+            XCTAssertFalse(earlyAsked.settled)
+            let wide = try XCTUnwrap(WebViewMasking.place(early, in: web, asked: earlyAsked))
+            for y: CGFloat in [10, obscured + 10, 60] {
+                XCTAssertTrue(wide.contains { $0.contains(CGRect(x: 180, y: y, width: 100, height: 20)) },
+                              "safe area \(safeArea): pinned at \(y) uncovered by \(wide)")
+            }
+            XCTAssertTrue(wide.contains { $0.contains(flow) })
+        }
+    }
+
+    /// The page's scale (a page with no viewport tag, laid out wide and
+    /// zoomed out) and the web view's page zoom are both applied.
+    func testWebViewMasksScaleWithThePageAndThePageZoom() throws {
+        for (head, pageZoom) in [
+            ("", CGFloat(1)),
+            ("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">", CGFloat(1.5)),
+        ] {
+            let (_, root) = makeWindow()
+            let web = WKWebView(frame: CGRect(x: 0, y: 40, width: 320, height: 400))
+            web.scrollView.contentInsetAdjustmentBehavior = .never
+            root.addSubview(web)
+            try load(web, """
+            <html><head>\(head)</head><body style="margin:0;width:980px;height:2000px">
+            <div class="rr-mask" style="position:absolute;left:40px;top:60px;width:100px;height:30px"></div>
+            </body></html>
+            """)
+            if pageZoom != 1 {
+                web.pageZoom = pageZoom
+                waitUntil {
+                    (self.evaluate(web, "document.documentElement.clientWidth") as? NSNumber)?.intValue == Int(320 / pageZoom)
+                }
+            } else {
+                XCTAssertLessThan(web.scrollView.zoomScale, 0.5, "a wide page is shown zoomed out")
+            }
+            let (answer, asked) = try ask(web, previousOffset: web.scrollView.contentOffset)
+            let rects = try XCTUnwrap(WebViewMasking.place(answer, in: web, asked: asked))
+            let k = web.scrollView.zoomScale * pageZoom
+            let input = CGRect(x: 40 * k, y: 60 * k, width: 100 * k, height: 30 * k)
+            XCTAssertTrue(rects.contains { $0.contains(input) && $0.height < input.height + 4 },
+                          "page zoom \(pageZoom), scale \(web.scrollView.zoomScale): \(input) not covered by \(rects)")
+        }
+    }
+
+    /// Measurements taken before a zoom, or before one of the page's own
+    /// scrollers moved, can't be placed: the web view is masked whole.
+    func testAWebViewZoomedOrInnerScrolledSinceItWasAskedIsMaskedWhole() throws {
+        let (_, root) = makeWindow()
+        let web = WKWebView(frame: CGRect(x: 0, y: 40, width: 320, height: 400))
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        root.addSubview(web)
+        try load(web, """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="margin:0">
+        <div style="position:absolute;left:0;top:0;width:300px;height:120px;overflow:auto">
+          <div style="height:1000px;position:relative">
+            <input type="password" value="SECRET" style="position:absolute;left:20px;top:30px;width:100px;height:20px;border:0">
+          </div>
+        </div>
+        </body></html>
+        """)
+        var (answer, asked) = try ask(web)
+        XCTAssertNotNil(WebViewMasking.place(answer, in: web, asked: asked))
+        let inner = try XCTUnwrap(Self.find(in: web.scrollView) { $0 !== web.scrollView && $0 is UIScrollView } as? UIScrollView,
+                                  "the overflow area has no scroller of its own")
+        inner.contentOffset.y += 50
+        XCTAssertNil(WebViewMasking.place(answer, in: web, asked: asked), "an inner scroller moved")
+
+        (answer, asked) = try ask(web)
+        XCTAssertNotNil(WebViewMasking.place(answer, in: web, asked: asked))
+        web.scrollView.setZoomScale(2, animated: false)
+        XCTAssertNotEqual(web.scrollView.zoomScale, asked.zoomScale, "the page didn't zoom")
+        XCTAssertNil(WebViewMasking.place(answer, in: web, asked: asked), "zoomed since")
+
+        // A page with nothing to mask has nothing to misplace.
+        let empty = WebViewMasking.Answer(rects: [], origin: .zero, moving: true)
+        XCTAssertEqual(WebViewMasking.place(empty, in: web, asked: asked), [])
+    }
+
+    /// An input inside an element whose position is being animated (a login
+    /// sheet sliding in) moves while the frame is taken: masked whole. An
+    /// animation that doesn't move anything (a fade) doesn't count.
+    func testAWebViewWithAMovingMaskedInputIsMaskedWhole() throws {
+        let (_, root) = makeWindow()
+        let web = WKWebView(frame: CGRect(x: 0, y: 40, width: 320, height: 400))
+        root.addSubview(web)
+        try load(web, """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+        @keyframes slide { from { transform: translateY(400px) } to { transform: translateY(0) } }
+        @keyframes pulse { from { opacity: 1 } to { opacity: 0.6 } }
+        </style></head>
+        <body style="margin:0;animation:pulse 2s infinite alternate">
+        <div id="sheet" style="position:absolute;left:0;top:0;width:300px;height:100px">
+          <input type="password" value="SECRET" style="width:100px;height:20px;border:0">
+        </div>
+        </body></html>
+        """)
+        var (answer, asked) = try ask(web)
+        XCTAssertFalse(answer.moving, "a fade doesn't move the input")
+        XCTAssertNotNil(WebViewMasking.place(answer, in: web, asked: asked))
+
+        _ = evaluate(web, "document.getElementById('sheet').style.animation = 'slide 5s infinite'; 1")
+        (answer, asked) = try ask(web)
+        XCTAssertTrue(answer.moving)
+        XCTAssertNil(WebViewMasking.place(answer, in: web, asked: asked))
+    }
+
+    /// Password inputs rendered inside web components' open shadow roots,
+    /// nested ones included, are found.
+    func testPasswordInputsInsideShadowRootsAreMasked() throws {
+        let (_, root) = makeWindow()
+        let web = WKWebView(frame: CGRect(x: 0, y: 40, width: 320, height: 400))
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        root.addSubview(web)
+        try load(web, """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="margin:0">
+        <x-field id="outer"></x-field>
+        <script>
+        var input = '<input type="password" value="SECRET" style="position:absolute;left:20px;width:100px;height:20px;border:0;top:';
+        var outer = document.getElementById('outer').attachShadow({ mode: 'open' });
+        outer.innerHTML = input + '30px"><x-inner id="inner"></x-inner>';
+        outer.getElementById('inner').attachShadow({ mode: 'open' }).innerHTML = input + '80px">';
+        </script>
+        </body></html>
+        """)
+        let (answer, _) = try ask(web)
+        for top in [30, 80] {
+            let input = CGRect(x: 20, y: top, width: 100, height: 20)
+            XCTAssertTrue(answer.rects.contains { $0.insetBy(dx: -0.5, dy: -0.5).contains(input) },
+                          "shadow input at \(top): \(answer.rects)")
+        }
+    }
+
+    /// A frame of another origin can't be read into. It is masked whole when
+    /// its attributes say it may take a card, a code or a password; other
+    /// embeds stay visible. Same-origin frames are looked into.
+    func testOnlyCredentialFramesOfAnotherOriginAreMaskedWhole() throws {
+        let (_, root) = makeWindow()
+        let web = WKWebView(frame: CGRect(x: 0, y: 40, width: 320, height: 400))
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        root.addSubview(web)
+        let frame = "position:absolute;left:0;width:300px;border:0;"
+        try load(web, """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="margin:0">
+        <iframe sandbox title="Secure card payment input frame" srcdoc="<input>" style="\(frame)top:0;height:60px"></iframe>
+        <iframe sandbox title="Video player" srcdoc="<p>video</p>" style="\(frame)top:80px;height:150px"></iframe>
+        <iframe sandbox allow="payment" srcdoc="<p>pay</p>" style="\(frame)top:250px;height:40px"></iframe>
+        <iframe srcdoc="<body style='margin:0'><input type=password style='position:absolute;left:10px;top:5px;width:50px;height:20px;border:0'></body>"
+                style="\(frame)top:310px;height:40px"></iframe>
+        </body></html>
+        """)
+        let (answer, _) = try ask(web)
+        func covered(_ r: CGRect) -> Bool { answer.rects.contains { $0.insetBy(dx: -0.5, dy: -0.5).contains(r) } }
+        XCTAssertTrue(covered(CGRect(x: 0, y: 0, width: 300, height: 60)), "card frame: \(answer.rects)")
+        XCTAssertTrue(covered(CGRect(x: 0, y: 250, width: 300, height: 40)), "payment frame: \(answer.rects)")
+        XCTAssertFalse(answer.rects.contains { $0.intersects(CGRect(x: 0, y: 81, width: 300, height: 148)) },
+                       "the video embed stays visible: \(answer.rects)")
+        XCTAssertTrue(covered(CGRect(x: 10, y: 315, width: 50, height: 20)), "same-origin frame input: \(answer.rects)")
+        XCTAssertEqual(answer.rects.count, 3, "\(answer.rects)")
     }
 
     // MARK: - Helpers
@@ -719,6 +1029,9 @@ final class MobilePrivacyReferenceParityTests: XCTestCase {
         waitUntil(timeout: 20) { loaded.done }
         XCTAssertTrue(loaded.done, "the page never loaded")
         _ = loaded
+        // Let the first layer commits land (initial zoom, the page's own
+        // scrollers) before the test measures anything.
+        spin(0.5)
     }
 
     /// One native capture cycle: look the web views up, then walk the frame.
@@ -728,6 +1041,43 @@ final class MobilePrivacyReferenceParityTests: XCTestCase {
         waitUntil(timeout: 2) { ready }
         XCTAssertTrue(ready, "prepareFrame never called back")
         return registry.windowPrivacyBounds(in: window)
+    }
+
+    /// Ask `web` for its masked inputs as a capture does, with no deadline.
+    /// `previousOffset`: the scroll view's offset at the previous lookup.
+    private func ask(_ web: WKWebView, previousOffset: CGPoint? = nil,
+                     allFields: Bool = false) throws -> (WebViewMasking.Answer, WebViewMasking.Geometry) {
+        let asked = WebViewMasking.Geometry(of: web, previousOffset: previousOffset)
+        var value: Any?
+        var done = false
+        let script = allFields ? WebViewMasking.allFieldsScript : WebViewMasking.passwordScript
+        web.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
+            if case .success(let v) = result { value = v }
+            if case .failure(let e) = result { XCTFail("the lookup failed: \(e)") }
+            done = true
+        }
+        waitUntil(timeout: 5) { done }
+        let answer = try XCTUnwrap(value.flatMap { WebViewMasking.answer(from: $0, pageZoom: asked.pageZoom) },
+                                   "malformed answer: \(String(describing: value))")
+        return (answer, asked)
+    }
+
+    private func evaluate(_ web: WKWebView, _ js: String) -> Any? {
+        var value: Any?
+        var done = false
+        web.evaluateJavaScript(js) { v, _ in value = v; done = true }
+        waitUntil(timeout: 5) { done }
+        return value
+    }
+
+    /// Wait until the page itself has scrolled to `top` (CSS px).
+    private func waitForPage(_ web: WKWebView, top: Double, line: UInt = #line) {
+        var seen: Double?
+        waitUntil {
+            seen = (self.evaluate(web, "window.visualViewport.pageTop") as? NSNumber)?.doubleValue
+            return seen == top
+        }
+        XCTAssertEqual(seen, top, "the page never caught up with the scroll view", line: line)
     }
 
     private func spin(_ seconds: TimeInterval) {
@@ -748,6 +1098,9 @@ private final class HostLikeView: UIView {}
 /// Stands in for an engine host view (named like one), whose taps are
 /// dropped.
 private final class FlutterStandInView: UIView {}
+
+/// Stands in for a view class an app masks everywhere with applyOcclusion.
+private final class CardStandInView: UIView {}
 
 private final class WebLoad: NSObject, WKNavigationDelegate {
     var done = false

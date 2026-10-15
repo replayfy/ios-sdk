@@ -179,30 +179,38 @@ final class MobileTouchCapture {
         // it's what surfaces real RN labels instead of class names. Text fields
         // use the placeholder, never the typed value (privacy).
         if let id = view.accessibilityIdentifier, !id.isEmpty { return id }
-        let label = contentLabel(view)
+        let (label, isText) = contentLabel(view)
         // Secure / password-type fields, every field while all are masked,
         // registered or class-masked views and their content, views under a
         // marker, or the whole screen occluded. Like the reference tracker,
         // taps on masked text inputs are kept with the content blanked (they
         // used to be dropped as system views); framework hosts stay dropped.
-        guard PrivacyRegistry.shared.isOccludedElement(view) else { return label }
-        return label != nil || isInsideTextInput(view) ? "***" : nil
+        if PrivacyRegistry.shared.isOccludedElement(view) {
+            return label != nil || isInsideTextInput(view) ? "***" : nil
+        }
+        // While every label is masked, so is the text a button, segment, bar
+        // button or placeholder draws (in a UILabel the frames cover), and
+        // the accessibility label that usually repeats it.
+        if isText && PrivacyRegistry.shared.occludeAllTextViews { return "***" }
+        return label
     }
 
-    /// ``describe(_:)`` before any masking.
-    private static func contentLabel(_ view: UIView) -> String? {
+    /// ``describe(_:)`` before any masking, and whether the label is text
+    /// shown on screen (a title, text, accessibility label or placeholder)
+    /// rather than the view's class name.
+    private static func contentLabel(_ view: UIView) -> (String?, isText: Bool) {
         if let b = view as? UIButton,
            let t = b.currentTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
-            return String(t.prefix(50))
+            return (String(t.prefix(50)), true)
         }
         if let l = view as? UILabel,
            let t = l.text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
-            return String(t.prefix(50))
+            return (String(t.prefix(50)), true)
         }
-        if let a = view.accessibilityLabel, !a.isEmpty { return String(a.prefix(50)) }
-        if let tf = view as? UITextField, let p = tf.placeholder, !p.isEmpty { return p }
+        if let a = view.accessibilityLabel, !a.isEmpty { return (String(a.prefix(50)), true) }
+        if let tf = view as? UITextField, let p = tf.placeholder, !p.isEmpty { return (p, true) }
         let cls = "\(type(of: view))"
-        return isSystemClassName(cls) ? nil : cls
+        return (isSystemClassName(cls) ? nil : cls, false)
     }
 
     /// A text field or text view, or one of its internal subviews.
