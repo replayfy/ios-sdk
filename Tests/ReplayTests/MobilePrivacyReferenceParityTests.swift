@@ -306,6 +306,47 @@ final class MobilePrivacyReferenceParityTests: XCTestCase {
         XCTAssertLessThanOrEqual(worst, 3, "masked pixels moved")
     }
 
+    /// A solid box covers every pixel it touches. Found in the simulator
+    /// end-to-end run: a 390 pt window at the capture scale 1.25 is 487.5 px,
+    /// the frame 488 px, and occludeSensitiveScreen left the last column half
+    /// covered, showing half of the screen's own pixels there; every mask
+    /// that didn't start and end on whole pixels had such a blended edge.
+    func testASolidBoxCoversEveryPixelItTouches() throws {
+        let size = CGSize(width: 39, height: 21)   // 48.75 x 26.25 px
+        let scale: CGFloat = 1.25
+        func capture(_ rects: [MaskRect]) throws -> Pixels {
+            // As MobileScreenshots.captureNow draws and masks a frame.
+            UIGraphicsBeginImageContextWithOptions(size, false, scale)
+            defer { UIGraphicsEndImageContext() }
+            let ctx = try XCTUnwrap(UIGraphicsGetCurrentContext())
+            UIColor.magenta.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            let rendered = try XCTUnwrap(UIGraphicsGetImageFromCurrentImageContext()?.cgImage)
+            MobileScreenshots(transport: StubUploader(), nativeCapture: false, privacyRects: { [] })
+                .maskRegions(rects, from: rendered, in: ctx, scale: scale)
+            return try XCTUnwrap(Pixels(try XCTUnwrap(UIGraphicsGetImageFromCurrentImageContext()?.cgImage)))
+        }
+        func uncovered(_ px: Pixels, _ xs: ClosedRange<Int>, _ ys: ClosedRange<Int>) -> [String] {
+            var out: [String] = []
+            for y in ys { for x in xs where !px.isOverlayGray(x, y) { out.append("\(x),\(y)=\(px.rgb(x, y))") } }
+            return out
+        }
+
+        // The whole window, as occludeSensitiveScreen paints it.
+        var px = try capture([MaskRect(rect: CGRect(origin: .zero, size: size), style: .overlay)])
+        XCTAssertEqual(px.width, 49, "the frame has a part-covered last column")
+        var left = uncovered(px, 0...(px.width - 1), 0...(px.height - 1))
+        XCTAssertTrue(left.isEmpty, "\(left.count) pixels not solid, e.g. \(left.prefix(4))")
+
+        // A box that starts and ends mid-pixel: 12.875...25.5 px across,
+        // 6.625...14.25 px down.
+        px = try capture([MaskRect(rect: CGRect(x: 10.3, y: 5.3, width: 10.1, height: 6.1), style: .overlay)])
+        left = uncovered(px, 12...25, 6...14)
+        XCTAssertTrue(left.isEmpty, "\(left.count) pixels not solid, e.g. \(left.prefix(4))")
+        XCTAssertFalse(px.isOverlayGray(11, 10) || px.isOverlayGray(26, 10) || px.isOverlayGray(18, 5)
+                       || px.isOverlayGray(18, 15), "only the pixels the box touches")
+    }
+
     // MARK: - 6. Blur edges
 
     func testTheBlurDoesNotLetTheEdgeShowThrough() throws {
@@ -415,6 +456,43 @@ final class MobilePrivacyReferenceParityTests: XCTestCase {
 
         registry.occludeAllScreen = true
         XCTAssertEqual(MobileTouchCapture.describe(plain), "***", "the whole screen is occluded")
+    }
+
+    /// iOS 26 ends a touch that a view's own gesture recognizers took over
+    /// (text fields, web views) with no view. Found in the simulator
+    /// end-to-end run: every tap on a secure, one-time-code or card field was
+    /// labelled "view", never "***". The view the touch began in names it,
+    /// or the view under where it ended.
+    func testATapThatEndsWithNoViewIsNamedByWhereItWas() {
+        let (window, root) = makeWindow()
+        let secure = field(in: root, y: 10, secure: true)
+        secure.placeholder = "Password"
+        let email = field(in: root, y: 60)
+        email.placeholder = "Email"
+        let button = UIButton(frame: CGRect(x: 20, y: 120, width: 100, height: 40))
+        button.setTitle("Go", for: .normal)
+        root.addSubview(button)
+        window.layoutIfNeeded()
+        let onSecure = secure.convert(CGPoint(x: secure.bounds.midX, y: secure.bounds.midY), to: window)
+        func label(ended: UIView?, began: UIView?, at point: CGPoint) -> String? {
+            MobileTouchCapture.gestureLabel(ended: ended, began: began, at: point, in: window)
+        }
+
+        XCTAssertEqual(label(ended: nil, began: secure, at: onSecure), "***", "named by where it began")
+        XCTAssertEqual(label(ended: nil, began: nil, at: onSecure), "***", "named by where it ended")
+        XCTAssertEqual(label(ended: button, began: secure, at: onSecure), "Go", "the touch's own view wins")
+        registry.remoteOccludeAllTextFields = true
+        XCTAssertEqual(label(ended: nil, began: email, at: onSecure), "***", "every field is masked")
+        registry.remoteOccludeAllTextFields = false
+        let detached = UITextField()
+        XCTAssertEqual(label(ended: nil, began: detached, at: onSecure), "***",
+                       "a view that left the window doesn't name it")
+        // A framework view names nothing: the generic label, as before.
+        let system = UIView(frame: CGRect(x: 0, y: 300, width: 320, height: 100))
+        root.addSubview(system)
+        XCTAssertEqual(label(ended: nil, began: system, at: CGPoint(x: 10, y: 350)), "view")
+        XCTAssertNil(label(ended: system, began: nil, at: CGPoint(x: 10, y: 350)),
+                     "a touch that kept its framework view is still dropped")
     }
 
     /// A marker that sits beside the content (SwiftUI) blanks whatever it
@@ -743,7 +821,92 @@ final class MobilePrivacyReferenceParityTests: XCTestCase {
             let input = CGRect(x: 40 * k, y: 60 * k, width: 100 * k, height: 30 * k)
             XCTAssertTrue(rects.contains { $0.contains(input) && $0.height < input.height + 4 },
                           "page zoom \(pageZoom), scale \(web.scrollView.zoomScale): \(input) not covered by \(rects)")
+            // The page reports the scale and width it was laid out for.
+            XCTAssertEqual(answer.scale ?? 0, web.scrollView.zoomScale, accuracy: 0.01)
+            XCTAssertEqual(answer.viewportWidth ?? 0, 320, accuracy: 2)
         }
+    }
+
+    /// A web view zoomed in (a pinch, or setZoomScale) and scrolled: each
+    /// input is placed at its place in the page times the zoom, minus the
+    /// scroll offset. WebKit gives a zoomed page's client rects from the
+    /// zoomed viewport while its visualViewport.offsetTop repeats pageTop, so
+    /// the zoom offset must not be taken off twice. Found in the simulator
+    /// end-to-end run: zoomed in, the mask sat over another part of the page
+    /// and the password showed in every frame.
+    func testWebViewMasksFollowAZoomedInPage() throws {
+        let (_, root) = makeWindow()
+        let web = WKWebView(frame: CGRect(x: 0, y: 40, width: 320, height: 400))
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        root.addSubview(web)
+        try load(web, """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4"></head>
+        <body style="margin:0;height:3000px">
+        <input type="password" value="SECRET" style="position:absolute;left:60px;top:300px;width:100px;height:20px;border:0">
+        </body></html>
+        """)
+        web.scrollView.setZoomScale(2, animated: false)
+        XCTAssertEqual(web.scrollView.zoomScale, 2, accuracy: 0.001, "the page didn't zoom")
+        web.scrollView.contentOffset = CGPoint(x: 80, y: 500)
+        waitForPage(web, top: 250)   // 500 pt at zoom 2
+        var scale: Double?
+        waitUntil {
+            scale = (self.evaluate(web, "window.visualViewport.scale") as? NSNumber)?.doubleValue
+            return scale == 2
+        }
+        XCTAssertEqual(scale, 2, "the page never caught up with the zoom")
+
+        let (answer, asked) = try ask(web, previousOffset: web.scrollView.contentOffset)
+        XCTAssertTrue(asked.settled)
+        let rects = try XCTUnwrap(WebViewMasking.place(answer, in: web, asked: asked))
+        let input = CGRect(x: 60 * 2 - 80, y: 300 * 2 - 500, width: 100 * 2, height: 20 * 2)
+        XCTAssertTrue(rects.contains { $0.contains(input) && $0.height < input.height + 4 },
+                      "zoomed in: \(input) not covered by \(rects)")
+    }
+
+    /// An answer the page gave before it caught up with the web view's zoom
+    /// or page zoom (just after setZoomScale, a pageZoom change, a resize)
+    /// describes a drawing that isn't on screen: the web view is masked whole
+    /// for that frame. Found in the simulator end-to-end run: the frame right
+    /// after a pageZoom change showed the password, its mask placed for the
+    /// new page zoom over the old layout.
+    func testAnAnswerForAnotherZoomOrLayoutIsMaskedWhole() throws {
+        let (_, root) = makeWindow()
+        let web = WKWebView(frame: CGRect(x: 0, y: 40, width: 320, height: 400))
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        root.addSubview(web)
+        try load(web, """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4"></head>
+        <body style="margin:0;height:2000px">
+        <input type="password" value="SECRET" style="position:absolute;left:20px;top:30px;width:100px;height:20px;border:0">
+        </body></html>
+        """)
+        let (answer, asked) = try ask(web, previousOffset: web.scrollView.contentOffset)
+        XCTAssertEqual(answer.scale, 1)
+        XCTAssertEqual(answer.viewportWidth ?? 0, 320, accuracy: 1)
+        XCTAssertNotNil(WebViewMasking.place(answer, in: web, asked: asked), "an up-to-date answer is placed")
+
+        func page(scale: Double, width: Double, pageZoom: CGFloat) throws -> WebViewMasking.Answer {
+            let value: [String: Any] = ["r": [[20.0, 30.0, 100.0, 20.0]], "o": [0.0, 0.0], "m": false,
+                                        "s": scale, "w": width]
+            return try XCTUnwrap(WebViewMasking.answer(from: value, pageZoom: pageZoom))
+        }
+        // Page zoom 1.5 set, the page still laid out for 1 (320 CSS px wide).
+        web.pageZoom = 1.5
+        let zoomedPage = WebViewMasking.Geometry(of: web, previousOffset: web.scrollView.contentOffset)
+        XCTAssertNil(WebViewMasking.place(try page(scale: 1, width: 320, pageZoom: 1.5), in: web, asked: zoomedPage),
+                     "laid out for another page zoom")
+        XCTAssertNotNil(WebViewMasking.place(try page(scale: 1, width: 320 / 1.5, pageZoom: 1.5), in: web,
+                                             asked: zoomedPage), "laid out for this page zoom")
+        web.pageZoom = 1
+
+        // Zoomed to 2, the page still at scale 1.
+        web.scrollView.setZoomScale(2, animated: false)
+        let zoomed = WebViewMasking.Geometry(of: web, previousOffset: web.scrollView.contentOffset)
+        XCTAssertNil(WebViewMasking.place(try page(scale: 1, width: 320, pageZoom: 1), in: web, asked: zoomed),
+                     "measured at another zoom")
+        XCTAssertNotNil(WebViewMasking.place(try page(scale: 2, width: 320, pageZoom: 1), in: web, asked: zoomed),
+                        "measured at this zoom")
     }
 
     /// Measurements taken before a zoom, or before one of the page's own

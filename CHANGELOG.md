@@ -26,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is masked (`occludeAllTextView`), labels taken from text on screen (button
   titles, accessibility labels, placeholders) are blanked too. Taps on
   secure fields, which used to be dropped, are now kept with the blanked
-  label.
+  label. A touch that iOS 26 ends with no view (text fields and web views
+  handle their own touches) is now named by the view it began in, so taps on
+  text fields carry `"***"` or the field's placeholder instead of `"view"`.
 - Observed inputs (`addObservedInput`) report `"***"` whenever the frames
   mask the field, not only for secure entry. Values a host reports with
   `trackInput` are blanked while every text field is masked or the screen
@@ -45,10 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type password, and inputs marked as a password, one-time code or card
   number), in same-origin frames and open shadow roots too. The SDK looks
   them up with a short read-only script before each frame and places each
-  mask where the page is scrolled to when the frame is taken. A web view
-  that has not answered in time, is being zoomed, had one of its own scroll
-  areas moved, or has a masked input moving in an animation, is masked whole
-  for that frame; so is a frame of another origin that is marked as a
+  mask where the page is scrolled and zoomed to when the frame is taken. A
+  web view that has not answered in time, is being zoomed, had one of its
+  own scroll areas moved, has a masked input moving in an animation, or
+  answered before it caught up with a zoom, page zoom or resize, is masked
+  whole for that frame; so is a frame of another origin that is marked as a
   payment or sign-in frame. Turn this off with
   `ReplayConfig(disableWebViewMasking: true)`.
 - The dashboard's "always mask input values" setting masks every text field
@@ -75,6 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back in place instead of being stretched over neighbouring pixels.
 - The blur no longer lets the original pixels show at the edges of a
   region.
+- Solid masks cover every pixel they touch. A pixel they only partly
+  covered showed a blend of what they hide: the edges of most masks, and
+  the last column of the frame under `occludeSensitiveScreen` (a 390 pt
+  screen is 487.5 px at the capture scale).
 - `occludeSensitiveScreen` now covers frames a hybrid host captures itself
   (Flutter), which it did not mask at all.
 

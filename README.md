@@ -447,11 +447,12 @@ components). While every text field is masked, text-like inputs and
 textareas are masked too. Before each frame the SDK asks the web views on
 screen where these are, with a short read-only script run in an isolated
 world (nothing is installed in your pages), and places each mask where the
-page is scrolled to when the frame is taken.
+page is scrolled and zoomed to when the frame is taken.
 
 A web view is masked whole for a frame when it has not answered in time (its
 first frame on screen, a slow page, a script error), while it is being
-zoomed, when one of the page's own scroll areas moved after it answered, or
+zoomed, when it answered before catching up with a zoom, page zoom or
+resize, when one of the page's own scroll areas moved after it answered, or
 while a masked input is being moved by an animation (a sliding login
 sheet). A frame of another origin can't be looked into: it is masked whole
 when its attributes mark it as a payment or sign-in frame (`allow="payment"`,

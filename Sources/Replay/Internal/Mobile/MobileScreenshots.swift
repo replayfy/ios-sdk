@@ -226,7 +226,10 @@ final class MobileScreenshots {
             guard !frame.isNull, frame.width > 0, frame.height > 0 else { continue }
             switch item.style {
             case .overlay:
-                fill(frame, in: ctx)
+                // Every pixel the box touches: one it only partly covered
+                // would show a blend of what it hides (a 390 pt window at
+                // 1.25 is 487.5 px).
+                fill(Self.outwardToPixels(frame, scale: scale), in: ctx)
             case .blur, .pixelate:
                 // Crop whole pixels, and draw the result back over exactly
                 // those pixels, so nothing is stretched or shifted.
@@ -244,6 +247,15 @@ final class MobileScreenshots {
                 masked.draw(in: drawFrame)
             }
         }
+    }
+
+    /// `rect` (points) grown to whole pixels of an image `scale` pixels per
+    /// point.
+    static func outwardToPixels(_ rect: CGRect, scale: CGFloat) -> CGRect {
+        let px = CGRect(x: rect.minX * scale, y: rect.minY * scale,
+                        width: rect.width * scale, height: rect.height * scale).integral
+        return CGRect(x: px.minX / scale, y: px.minY / scale,
+                      width: px.width / scale, height: px.height / scale)
     }
 
     private func fill(_ rect: CGRect, in ctx: CGContext) {

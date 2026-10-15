@@ -63,10 +63,13 @@ final class MobileTouchCapture {
                 // blockGestures is not recorded (the reference rule); the
                 // app still gets it.
                 let blocked = PrivacyRegistry.shared.isGestureBlocked(at: point, in: window)
-                starts[id] = (point, CACurrentMediaTime(), blocked)
+                starts[id] = TouchStart(point: point, time: CACurrentMediaTime(), blocked: blocked,
+                                        view: touch.view)
             case .ended:
                 let end = touch.location(in: window)
-                let (start, t0, blocked) = starts[id] ?? (end, CACurrentMediaTime(), false)
+                let began = starts[id]
+                let (start, t0, blocked) = (began?.point ?? end, began?.time ?? CACurrentMediaTime(),
+                                            began?.blocked ?? false)
                 starts[id] = nil
                 if blocked { break }
                 let dx = end.x - start.x, dy = end.y - start.y
@@ -80,7 +83,8 @@ final class MobileTouchCapture {
                 }
                 // Drop taps on framework/system views (keyboard, FlutterView, …)
                 // — describe returns nil for those.
-                guard let label = describe(touch.view) else { break }
+                guard let label = gestureLabel(ended: touch.view, began: began?.view,
+                                               at: end, in: window) else { break }
                 let x = UInt64(max(end.x, 0)), y = UInt64(max(end.y, 0))
                 handler(label, x, y, kind, direction(dx, dy))
             case .cancelled:
@@ -90,9 +94,28 @@ final class MobileTouchCapture {
         }
     }
 
-    /// Where and when each touch began, and whether it began in a view
-    /// whose gestures are blocked.
-    private static var starts: [ObjectIdentifier: (CGPoint, CFTimeInterval, Bool)] = [:]
+    /// Where and when a touch began, whether it began in a view whose
+    /// gestures are blocked, and the view it began in.
+    private struct TouchStart {
+        let point: CGPoint
+        let time: CFTimeInterval
+        let blocked: Bool
+        weak var view: UIView?
+    }
+    private static var starts: [ObjectIdentifier: TouchStart] = [:]
+
+    /// The label of a finished gesture: ``describe(_:)`` of the view it
+    /// ended in. A touch a gesture recognizer took over (text fields and web
+    /// views have their own) ends with no view on iOS 26, and was labelled
+    /// "view" whatever it touched, so a tap on a masked field never came out
+    /// as "***". Then the view it began in names it, or failing that the
+    /// view under where it ended; when neither can (a framework view), it
+    /// keeps the generic "view" it always had.
+    static func gestureLabel(ended: UIView?, began: UIView?, at point: CGPoint, in window: UIWindow) -> String? {
+        if let ended { return describe(ended) }
+        let view = (began?.window === window ? began : nil) ?? window.hitTest(point, with: nil)
+        return describe(view) ?? "view"
+    }
 
     // ── Advanced multi-touch (pinch / rotate) ────────────────────────
     // Correlate exactly two simultaneous touches: capture their initial

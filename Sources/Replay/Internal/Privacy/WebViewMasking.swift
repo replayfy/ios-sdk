@@ -56,6 +56,13 @@ final class WebViewMasking {
         /// A masked input sits in an element whose position or size is being
         /// animated, so it is moving while the frame is taken.
         let moving: Bool
+        /// The page's scale when it measured (its visualViewport.scale),
+        /// which is the scroll view's zoom once the page has caught up.
+        var scale: CGFloat? = nil
+        /// The width of the viewport the page was laid out in, in points.
+        /// The web view's own width once the page has laid out for its page
+        /// zoom and size.
+        var viewportWidth: CGFloat? = nil
     }
 
     /// How a web view was zoomed, sized and scrolled when it was asked.
@@ -184,15 +191,18 @@ final class WebViewMasking {
     ///
     /// Nil, so the whole web view is masked, when the measurements can't be
     /// placed: a masked input is being animated, the web view was zoomed or
-    /// resized since it was asked or is being zoomed, or one of the page's
-    /// own scrollers moved.
+    /// resized since it was asked or is being zoomed, one of the page's
+    /// own scrollers moved, or the page measured before it caught up with
+    /// the zoom, page zoom or size the web view has (see
+    /// ``answerMatchesLayout(_:of:)``).
     static func place(_ answer: Answer, in web: WKWebView, asked: Geometry) -> [CGRect]? {
         guard !answer.rects.isEmpty else { return [] }
         let sv = web.scrollView
         guard !answer.moving, !sv.isZooming, !sv.isZoomBouncing,
               sv.zoomScale == asked.zoomScale, web.pageZoom == asked.pageZoom,
               web.bounds.size == asked.size,
-              asked.scrollers.allSatisfy({ $0.isStill }) else { return nil }
+              asked.scrollers.allSatisfy({ $0.isStill }),
+              answerMatchesLayout(answer, of: web) else { return nil }
         var offsets = [sv.contentOffset]
         if let p = sv.layer.presentation(), p.bounds.origin != sv.contentOffset {
             offsets.append(p.bounds.origin)
@@ -218,6 +228,23 @@ final class WebViewMasking {
         return out
     }
 
+    /// Whether the page measured the drawing the web view shows now. The web
+    /// process lags the scroll view: just after a zoom, a pageZoom change or
+    /// a resize the screen already shows the new zoom (the old layout,
+    /// scaled) while the page still answers for the old one, and its rects
+    /// would land somewhere else. So the page's scale must be the scroll
+    /// view's zoom, and its viewport, in points, as wide as the web view
+    /// (less a side inset the viewport may sit inside).
+    static func answerMatchesLayout(_ answer: Answer, of web: WKWebView) -> Bool {
+        let zoom = web.scrollView.zoomScale
+        if let s = answer.scale, abs(s - zoom) > max(0.01, zoom * 0.01) { return false }
+        guard let w = answer.viewportWidth else { return true }
+        let width = web.bounds.width
+        let a = web.scrollView.adjustedContentInset, safe = web.safeAreaInsets
+        return [width, width - a.left - a.right, width - safe.left - safe.right]
+            .contains { abs($0 - w) <= max(2, $0 * 0.01) }
+    }
+
     /// An upper bound on the inset at the top and left of the web view that
     /// the page's viewport starts below: the scroll view's adjusted content
     /// inset, the safe area, and the web view's obscured content insets.
@@ -235,22 +262,32 @@ final class WebViewMasking {
         return UIEdgeInsets(top: max(top, 0), left: max(left, 0), bottom: 0, right: 0)
     }
 
-    /// The script's `{r: [[x, y, w, h], …], o: [x, y], m: moving}` (CSS px ×
-    /// the page's scale) × the web view's page zoom. `r` is relative to the
-    /// visual viewport, `o` is that viewport's top-left in the page. Nil when
-    /// the answer is malformed, so the web view is masked whole.
+    /// The script's `{r: [[x, y, w, h], …], o: [x, y], m: moving, s: scale,
+    /// w: width}` (CSS px × the page's scale) × the web view's page zoom. `r`
+    /// is relative to the visual viewport, `o` is that viewport's top-left in
+    /// the page, `w` its width. Nil when the answer is malformed, so the web
+    /// view is masked whole.
     static func answer(from value: Any, pageZoom zoom: CGFloat) -> Answer? {
         guard let dict = value as? [String: Any],
               let rows = dict["r"] as? [Any],
               let o = numbers(dict["o"], count: 2),
-              let moving = dict["m"] as? Bool else { return nil }
+              let moving = dict["m"] as? Bool,
+              let scale = number(dict["s"]), scale > 0,
+              let width = number(dict["w"]) else { return nil }
         var rects: [CGRect] = []
         rects.reserveCapacity(rows.count)
         for row in rows {
             guard let v = numbers(row, count: 4) else { return nil }
             rects.append(CGRect(x: v[0] * zoom, y: v[1] * zoom, width: v[2] * zoom, height: v[3] * zoom))
         }
-        return Answer(rects: rects, origin: CGPoint(x: o[0] * zoom, y: o[1] * zoom), moving: moving)
+        return Answer(rects: rects, origin: CGPoint(x: o[0] * zoom, y: o[1] * zoom), moving: moving,
+                      scale: scale, viewportWidth: width * zoom)
+    }
+
+    private static func number(_ value: Any?) -> CGFloat? {
+        guard let n = value as? NSNumber else { return nil }
+        let v = CGFloat(n.doubleValue)
+        return v.isFinite ? v : nil
     }
 
     private static func numbers(_ value: Any?, count: Int) -> [CGFloat]? {
@@ -274,14 +311,21 @@ final class WebViewMasking {
     /// or sign-in frames); video, map and other embeds stay visible, as in
     /// the reference tracker. Zero-size elements are skipped.
     ///
-    /// Also returns where the visual viewport is in the page, and whether a
-    /// masked element sits in one whose position or size is being animated.
+    /// Also returns where the visual viewport is in the page, its scale and
+    /// width, and whether a masked element sits in one whose position or
+    /// size is being animated.
     private static func script(allFields: Bool) -> String {
         return #"""
         (function (allFields) {
           var vv = window.visualViewport;
-          var s = vv ? vv.scale : 1, ox = vv ? vv.offsetLeft : 0, oy = vv ? vv.offsetTop : 0;
+          var s = vv ? vv.scale : 1, vw = vv ? vv.width : window.innerWidth;
           var px = vv ? vv.pageLeft : window.scrollX, py = vv ? vv.pageTop : window.scrollY;
+          // The page's top-left in client coordinates. Zoomed in, WebKit gives
+          // client rects from the zoomed viewport while offsetLeft/Top repeat
+          // pageLeft/Top; elsewhere they are from the layout viewport.
+          // Measuring from the root element is right either way.
+          var de = document.documentElement, dr = de.getBoundingClientRect(), dcs = getComputedStyle(de);
+          var bx = dr.left - (parseFloat(dcs.marginLeft) || 0), by = dr.top - (parseFloat(dcs.marginTop) || 0);
           var textTypes = { text: 1, email: 1, url: 1, search: 1, tel: 1, number: 1 };
           var secureTokens = { 'current-password': 1, 'new-password': 1, 'one-time-code': 1, 'cc-number': 1 };
           var credentialFrame = /pay|card|checkout|billing|secure|3ds|auth|login|log-in|signin|sign-in|password|passcode|otp|verif|account|bank|wallet|cvc|cvv/i;
@@ -294,7 +338,7 @@ final class WebViewMasking {
               rt = Math.min(rt, clip[2]); b = Math.min(b, clip[3]);
             }
             if (!(rt - l > 0) || !(b - t > 0)) return;
-            out.push([(l - ox) * s, (t - oy) * s, (rt - l) * s, (b - t) * s]);
+            out.push([(l - bx - px) * s, (t - by - py) * s, (rt - l) * s, (b - t) * s]);
             hits.push(el);
           }
           function isSecure(el) {
@@ -375,7 +419,7 @@ final class WebViewMasking {
               }
             }
           }
-          return { r: out, o: [px * s, py * s], m: moving };
+          return { r: out, o: [px * s, py * s], m: moving, s: s, w: vw * s };
         })(
         """# + (allFields ? "true" : "false") + ");"
     }
